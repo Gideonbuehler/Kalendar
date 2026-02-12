@@ -25,23 +25,6 @@ A beautiful, highly customizable desktop calendar application for Nextcloud buil
 - **Time-of-Day Gradients** - Events are color-coded by time of day
 - **Next Event Countdown** - Live countdown in the header with hover dropdown for all upcoming events
 
-### Task Management
-
-- **Task Lists** - Create and manage multiple task lists with color-coded dots
-- **Inline Task Creation** - Add tasks and lists without leaving the sidebar
-- **Task Completion** - Toggle tasks as done with progress counters
-- **Drag to Calendar** - Drag tasks onto the calendar to schedule them as events
-- **Custom Delete Confirmation** - Themed confirmation dialog for deletions
-- **Cascade Deletion** - Deleting a list removes all its tasks and associated calendar events
-
-### Sidebar
-
-- **Mini Calendar** - Compact month view with event indicators
-- **Day Timeline** - Horizontal timeline of the selected day's events
-- **Calendar List** - Toggle visibility of individual calendars
-- **Productivity Heatmap** - Visual overview of your activity
-- **Event Insights** - Statistics about your calendar usage
-
 ### Secure
 
 - **App Password Support** - Use Nextcloud app-specific passwords
@@ -143,7 +126,11 @@ Access settings by clicking the gear icon (⚙️) in the header.
 - **Default Task Duration**: 5 minutes to 2 hours
 - **Show Week Numbers**: Display week numbers in calendar
 
-## App Password Setup
+## License
+
+MIT License - feel free to use this project for personal or commercial purposes.
+
+
 
 For better security, create an App Password in Nextcloud:
 

@@ -1,4 +1,17 @@
-// Day Timeline Component — compact vertical timeline showing today's events at a glance
+// ============================================================================
+// DayTimeline Component — DayTimeline.js
+// ============================================================================
+// Compact horizontal timeline showing the selected day's events at a glance.
+// Rendered below the mini calendar in the sidebar.
+//
+// Features:
+//   - Horizontal bar with hour markers (6am–midnight, auto-extending)
+//   - Colored event blocks positioned proportionally along the timeline
+//   - "Now" indicator (red line) on today's timeline
+//   - Event list below the bar (up to 4 events) with active highlighting
+//   - Time-of-day gradient colors matching the main calendar's scheme
+// ============================================================================
+
 class DayTimeline extends React.Component {
   constructor(props) {
     super(props);
@@ -17,6 +30,7 @@ class DayTimeline extends React.Component {
     );
   }
 
+  /** Filters and sorts events for the selected day. Excludes preview events. */
   _getTodayEvents() {
     const { events, selectedDate } = this.props;
     if (!events) return [];
@@ -30,6 +44,7 @@ class DayTimeline extends React.Component {
       .sort((a, b) => new Date(a.start) - new Date(b.start));
   }
 
+  /** Returns a gradient color based on time of day (warm→cool palette). */
   _getTimeColor(hour) {
     if (hour >= 5 && hour < 9) return "#f6d365";
     if (hour >= 9 && hour < 12) return "#fa709a";

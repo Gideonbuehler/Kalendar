@@ -1,33 +1,51 @@
-// Calendar View Component
+// ============================================================================
+// CalendarView Component — CalendarView.js
+// ============================================================================
+// The main calendar display component. Wraps react-big-calendar and provides:
+//   - Sidebar with MiniCalendar, calendar list, and task manager
+//   - Header with title, next-event countdown, refresh/settings buttons
+//   - Full-size calendar grid (month/week/day/agenda views)
+//   - Drag-and-drop: tasks onto calendar, Ctrl+Drag event moving
+//   - Time-of-day gradient coloring for events
+//   - Calendar color strips on events (via inset box-shadow)
+//   - Live preview while dragging (ghost element + dashed preview event)
+// ============================================================================
+
 class CalendarView extends React.Component {
   constructor(props) {
     super(props);
-    // Note: Drag and drop requires npm install react-dnd and react-dnd-html5-backend
-    // For CDN usage, we'll use the base Calendar component
+    // Use the base Calendar component from the CDN-loaded ReactBigCalendar
     this.CalendarComponent = ReactBigCalendar.Calendar;
     this.state = {
-      isDraggingOver: false,
-      draggedTask: null,
-      previewEvent: null, // Preview of where task will be dropped
+      isDraggingOver: false,   // True while a task is being dragged over the calendar
+      previewEvent: null,      // Temporary event shown at the drop position
     };
-    this._rafId = null; // For requestAnimationFrame-based drag over updates    this._lastPreviewTime = null; // Track last preview start time to avoid redundant setState
-    this._dropHandled = false; // Flag to prevent handleGlobalDragEnd from clearing after a successful drop
+    this._draggedTask = null;    // Currently dragged task data (kept outside state to avoid re-renders)
+    this._rafId = null;          // requestAnimationFrame ID for smooth drag-over updates
+    this._lastPreviewTime = null; // Prevents redundant setState when preview time hasn't changed
+    this._dropHandled = false;   // Prevents handleGlobalDragEnd from clearing after a successful drop
   }
+  /**
+   * componentDidMount — Sets up native event listeners for drag-and-drop.
+   *
+   * Why native listeners? React's synthetic onDrop fires via bubbling, but
+   * react-big-calendar's internal elements swallow drop events. Using
+   * capture-phase native listeners ensures we intercept drops first.
+   *
+   * Also sets up Ctrl+Drag event moving (mousedown → mousemove → mouseup).
+   */
   componentDidMount() {
-    // Use native event listeners in CAPTURE phase so that drop events
-    // are intercepted before ReactBigCalendar's internal elements can
-    // swallow them. React's synthetic onDrop uses bubbling, which doesn't
-    // reach the wrapper when a child element prevents propagation.
+    // Native dragover handler — prevents default to allow dropping
     this._nativeDragOver = (e) => {
       // Only intercept if we have a task being dragged
-      if (this.state.draggedTask) {
+      if (this._draggedTask) {
         e.preventDefault();
         e.dataTransfer.dropEffect = "move";
       }
     };
     this._nativeDrop = (e) => {
       if (
-        this.state.draggedTask ||
+        this._draggedTask ||
         (e.dataTransfer && e.dataTransfer.types.includes("application/json"))
       ) {
         this.handleDrop(e);
@@ -275,7 +293,7 @@ class CalendarView extends React.Component {
 
     this._rafId = requestAnimationFrame(() => {
       this._rafId = null;
-      const taskData = this.state.draggedTask;
+      const taskData = this._draggedTask;
 
       if (taskData) {
         // Calculate where it would drop and show preview
@@ -320,24 +338,16 @@ class CalendarView extends React.Component {
     });
   };
   /**
-   * _getEventCalendarColor — Resolves the calendar color for an event.
-   * Looks up by calendarUrl in the calendars array, falls back to a
-   * hash-based color from the calendar name, or returns null.
+   * eventPropGetter — Custom styling callback for react-big-calendar.
+   *
+   * Determines the CSS class and inline style for each event based on:
+   *   1. Preview events: semi-transparent with dashed border
+   *   2. Completed events: greyed out with line-through
+   *   3. Regular events: time-of-day gradient (warm→cool) + calendar color strip
+   *
+   * Calendar color is rendered as an inset box-shadow (5px left strip)
+   * rather than borderLeft, because CSS hover rules can't override inline borders.
    */
-  _getEventCalendarColor = (event) => {
-    const { calendars } = this.props;
-    if (!calendars || !event.calendarUrl) return null;
-    const cal = calendars.find((c) => c.url === event.calendarUrl);
-    if (!cal) return null;
-    if (cal.color) return cal.color;
-    // Hash-based fallback from calendar name
-    const colors = ["#5e72e4","#11cdef","#2dce89","#fb6340","#f5365c","#ffd600","#8965e0","#f3a4b5"];
-    const name = cal.displayName || "";
-    const idx = name.split("").reduce((a, c) => a + c.charCodeAt(0), 0);
-    return colors[idx % colors.length];
-  };
-
-  // Helper to customize day/time slot rendering to show preview
   eventPropGetter = (event, start, end, isSelected) => {
     if (event.isPreview) {
       return {
@@ -409,18 +419,26 @@ class CalendarView extends React.Component {
       style,
     };
   };
+  // Called when a task starts being dragged from the sidebar TaskManager
   handleTaskDragStart = (dragData) => {
     console.log("Task drag started:", dragData);
     this._dropHandled = false;
     this._lastPreviewTime = null;
     this._lastDragPosition = null;
     this._isOverCalendar = false;
-    this.setState({ draggedTask: dragData });
+    this._draggedTask = dragData;
     // Add global listener to clear drag state if dropped elsewhere (not on calendar)
     document.addEventListener("dragend", this.handleGlobalDragEnd, {
       once: true,
     });
   };
+  /**
+   * handleGlobalDragEnd — Fallback handler for when the native drop event
+   * doesn't fire (e.g., react-big-calendar swallows it).
+   *
+   * Checks if the drag ended over the calendar using the last known
+   * mouse position, and if so, treats it as a drop.
+   */
   handleGlobalDragEnd = (e) => {
     // If the drop was already handled on the calendar, don't do anything
     if (this._dropHandled) {
@@ -428,7 +446,7 @@ class CalendarView extends React.Component {
       return;
     }
 
-    const draggedTask = this.state.draggedTask;
+    const draggedTask = this._draggedTask;
 
     // Determine if the drag ended over the calendar.
     // We can't rely on _isOverCalendar because handleDragLeave often fires
@@ -459,9 +477,9 @@ class CalendarView extends React.Component {
       console.log("Drop completed (via dragend) — slot:", slotInfo);
 
       // Clear drag state
+      this._draggedTask = null;
       this.setState({
         isDraggingOver: false,
-        draggedTask: null,
         previewEvent: null,
       });
       this._lastPreviewTime = null;
@@ -476,9 +494,9 @@ class CalendarView extends React.Component {
     }
 
     // Drag ended outside the calendar — clear state
+    this._draggedTask = null;
     this.setState({
       isDraggingOver: false,
-      draggedTask: null,
       previewEvent: null,
     });
     this._lastPreviewTime = null;
@@ -503,7 +521,7 @@ class CalendarView extends React.Component {
       this._rafId = null;
     }
 
-    // Only clear visual state, keep draggedTask so drop still works
+    // Only clear visual state, keep _draggedTask so drop still works
     this.setState({
       isDraggingOver: false,
       previewEvent: null,
@@ -511,11 +529,16 @@ class CalendarView extends React.Component {
     this._lastPreviewTime = null;
   };
 
+  /**
+   * handleDrop — Processes a task dropped onto the calendar.
+   * Reads drag data from dataTransfer or the stored _draggedTask reference,
+   * calculates the target time slot, and calls onTaskDroppedOnCalendar.
+   */
   handleDrop = (e) => {
     e.preventDefault();
     e.stopPropagation();
 
-    // Prevent duplicate drop handling (drop events can bubble/fire twice)
+    // Prevent duplicate drop handling (can fire from both native and React)
     if (this._dropProcessed) {
       return;
     }
@@ -543,11 +566,11 @@ class CalendarView extends React.Component {
       currentTarget: this.calendarWrapperRef,
       target: e.target,
     }; // Clear drag visual state but keep task data until we process it
-    const draggedTask = this.state.draggedTask;
+    const draggedTask = this._draggedTask;
+    this._draggedTask = null;
 
     this.setState({
       isDraggingOver: false,
-      draggedTask: null,
       previewEvent: null,
     });
     this._lastPreviewTime = null;
@@ -584,6 +607,17 @@ class CalendarView extends React.Component {
       console.error("Error handling drop:", error);
     }
   };
+  /**
+   * calculateDropSlot — Converts a mouse position to a calendar date/time.
+   *
+   * For week/day views: reads the DOM layout of time slots and columns
+   * to calculate which day column and time row the cursor is over.
+   *
+   * For month view: walks up the DOM to find the rbc-date-cell ancestor
+   * and reads the date number from its button link.
+   *
+   * Returns { start: Date, action: string }
+   */
   calculateDropSlot = (e) => {
     // If e.currentTarget is not available or is not an element, fallback
     const currentTarget =
@@ -765,7 +799,7 @@ class CalendarView extends React.Component {
       onLogout,
     } = this.props;
 
-    console.log("CalendarView rendering with events:", events); // Filter to get event calendars only
+    // Filter to get event calendars only
     const eventCalendars = calendars
       ? calendars.filter(
           (cal) => cal.components && cal.components.includes("VEVENT")
@@ -792,7 +826,10 @@ class CalendarView extends React.Component {
         onToggleTaskManager: this.props.onToggleTaskManager,
         showTaskManager: this.props.showTaskManager,
         taskLists: this.props.taskLists,
-        onAddTaskList: this.props.onAddTaskList,
+        onCreateList: this.props.onCreateList,
+        onCreateTask: this.props.onCreateTask,
+        onDeleteTask: this.props.onDeleteTask,
+        onDeleteList: this.props.onDeleteList,
         onToggleTask: this.props.onToggleTask,
         onTaskToCalendar: this.props.onTaskToCalendar,
         onTaskClick: this.props.onTaskClick,
@@ -941,6 +978,38 @@ class CalendarView extends React.Component {
     );
   }
 
+  /**
+   * _getEventCalendarColor — Resolves the display color for an event's calendar.
+   * Tries to match by calendarUrl first, then by calendarName.
+   * Falls back to a hash-based consistent color from getCalendarColor().
+   */
+  _getEventCalendarColor(event) {
+    // Try to match by calendarUrl first
+    if (event.calendarUrl && this.props.calendars) {
+      const cal = this.props.calendars.find((c) => c.url === event.calendarUrl);
+      if (cal) {
+        return cal.color || this.getCalendarColor(cal.displayName);
+      }
+    }
+    // Fallback: use calendarName if available
+    if (event.calendarName) {
+      // Check if any calendar matches by displayName
+      if (this.props.calendars) {
+        const cal = this.props.calendars.find((c) => c.displayName === event.calendarName);
+        if (cal) {
+          return cal.color || this.getCalendarColor(cal.displayName);
+        }
+      }
+      return this.getCalendarColor(event.calendarName);
+    }
+    return null;
+  }
+
+  /**
+   * getCalendarColor — Generates a deterministic color for a calendar name.
+   * Uses a simple character-code hash to pick from a preset palette.
+   * Ensures the same calendar always gets the same color.
+   */
   getCalendarColor(calendarName) {
     // Generate a consistent color for each calendar
     const colors = [

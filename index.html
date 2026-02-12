@@ -1,3 +1,21 @@
+<!--
+  ============================================================================
+  index.html — Kalendar Application Entry Point
+  ============================================================================
+  The main HTML file loaded by Electron's BrowserWindow.
+
+  Architecture:
+    - React 17 + ReactDOM loaded from CDN (no build step / no JSX)
+    - react-big-calendar + Moment.js for the calendar display
+    - Global alias `h = React.createElement` used by all components
+    - Components loaded as plain <script> tags in dependency order
+    - Styles: theme.css (CSS variables) + main.css (layout & components)
+
+  Script loading order matters! Components that depend on other components
+  must be loaded after their dependencies (e.g., CalendarView depends on
+  MiniCalendar, DayTimeline, NextEventCountdown, etc.)
+  ============================================================================
+-->
 <!DOCTYPE html>
 <html lang="en">
 <head>

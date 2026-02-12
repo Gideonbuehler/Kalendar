@@ -1,4 +1,29 @@
-/* Kalendar - Modern Calendar Application Styles */
+/* ============================================================================
+ * main.css — Primary Application Stylesheet
+ * ============================================================================
+ * Contains all layout and component styles for the Kalendar app.
+ * Uses CSS custom properties defined in theme.css for theming support.
+ *
+ * Major sections (in order):
+ *   - Base reset & app shell
+ *   - Sidebar (mini calendar, calendar list, tasks)
+ *   - App header & controls
+ *   - Calendar container & react-big-calendar overrides
+ *   - Event styling (time-of-day gradients, calendar color strips, hover)
+ *   - Modal base styles (overlay, header, body, footer)
+ *   - Event Modal (em-* classes, Nextcloud-inspired design)
+ *   - Settings modal
+ *   - Calendar settings & sharing modal
+ *   - Context menu
+ *   - Task manager inline forms
+ *   - Day timeline
+ *   - Productivity heatmap
+ *   - Event insights
+ *   - Next event countdown
+ *   - Login page
+ *   - Keyboard hint bar
+ *   - Animations & transitions
+ * ============================================================================ */
 
 html, body, #app {
   height: 100%;
@@ -175,7 +200,7 @@ body {
   background: var(--surface);
   padding: var(--spacing-xxl);
   border-radius: var(--radius-xl);
-  box-shadow: 0 20px 60px var(--shadow-lg);
+  box-shadow: 0 8px 32px var(--shadow-lg);
   width: 100%;
   max-width: 450px;
   animation: slideUp var(--transition-slow);
@@ -199,7 +224,6 @@ body {
 
 .logo-icon {
   font-size: var(--font-3xl);
-  animation: bounce 2s infinite;
 }
 
 .app-subtitle {
@@ -210,7 +234,7 @@ body {
 
 /* Form Styles */
 .form-group {
-  margin-bottom: var(--spacing-lg);
+  margin-bottom: var(--spacing-sm);
 }
 
 .form-row {
@@ -221,7 +245,7 @@ body {
 
 label {
   display: block;
-  margin-bottom: var(--spacing-sm);
+  margin-bottom: var(--spacing-xs);
   color: var(--text-primary);
   font-weight: 600;
   font-size: var(--font-sm);
@@ -233,7 +257,7 @@ input[type="datetime-local"],
 textarea,
 select {
   width: 100%;
-  padding: var(--spacing-md);
+  padding: var(--spacing-sm) var(--spacing-md);
   border: 2px solid var(--border-color);
   border-radius: var(--radius-md);
   font-size: var(--font-base);
@@ -362,12 +386,12 @@ button {
 }
 
 .btn-primary:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 6px 20px var(--shadow-lg);
+  box-shadow: 0 4px 12px rgba(94, 114, 228, 0.25);
+  filter: brightness(1.05);
 }
 
 .btn-primary:active {
-  transform: translateY(0);
+  transform: scale(0.98);
 }
 
 .btn-secondary {
@@ -411,12 +435,11 @@ button {
 
 .app-header {
   background: var(--surface);
-  padding: var(--spacing-lg) var(--spacing-xl);
+  padding: var(--spacing-md) var(--spacing-xl);
   border-bottom: 1px solid var(--border-color);
   display: flex;
   align-items: center;
   justify-content: space-between;
-  box-shadow: 0 2px 8px var(--shadow);
   z-index: 10;
 }
 
@@ -434,25 +457,6 @@ button {
   align-items: center;
   gap: var(--spacing-sm);
   margin: 0;
-  position: relative;
-  overflow: hidden;
-}
-
-.app-title-header::after {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: -100%;
-  width: 60%;
-  height: 100%;
-  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.08), transparent);
-  animation: headerShimmer 6s ease-in-out infinite;
-  pointer-events: none;
-}
-
-@keyframes headerShimmer {
-  0%, 100% { left: -100%; }
-  50% { left: 150%; }
 }
 
 .header-controls {
@@ -482,7 +486,6 @@ button {
   background: var(--surface);
   border-radius: var(--radius-lg);
   padding: var(--spacing-lg);
-  box-shadow: 0 2px 12px var(--shadow);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -528,12 +531,12 @@ button {
   border: none;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
   transition: all var(--transition-fast);
+  overflow: visible;
 }
 
 .rbc-event:hover {
-  background-color: var(--accent-color);
-  transform: translateY(-1px);
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+  filter: brightness(1.15);
+  transform: translateY(-1px) scale(1.02);
 }
 
 .rbc-event-label {
@@ -771,8 +774,7 @@ button {
 }
 
 [data-theme="dark"] .rbc-event:hover {
-  background-color: var(--accent-color);
-  box-shadow: 0 2px 8px rgba(45, 206, 234, 0.4);
+  filter: brightness(1.25);
 }
 
 [data-theme="dark"] .rbc-header {
@@ -841,30 +843,33 @@ button {
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(0, 0, 0, 0.5);
+  background: rgba(0, 0, 0, 0.4);
   backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 1000;
   animation: fadeIn var(--transition-fast);
   padding: var(--spacing-lg);
+  overflow: auto;
 }
 
 .modal {
   background: var(--surface);
   border-radius: var(--radius-xl);
-  box-shadow: 0 20px 60px var(--shadow-lg);
-  max-width: 600px;
+  box-shadow: 0 8px 32px var(--shadow), 0 1px 4px var(--shadow);
+  max-width: 560px;
   width: 100%;
   max-height: 90vh;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
   animation: slideUp var(--transition-base);
 }
 
 .modal-header {
-  padding: var(--spacing-xl);
+  padding: var(--spacing-sm) var(--spacing-lg);
   border-bottom: 1px solid var(--border-color);
   display: flex;
   align-items: center;
@@ -872,8 +877,8 @@ button {
 }
 
 .modal-header h2 {
-  font-size: var(--font-2xl);
-  font-weight: 700;
+  font-size: var(--font-lg);
+  font-weight: 600;
   color: var(--text-primary);
   display: flex;
   align-items: center;
@@ -882,52 +887,314 @@ button {
 }
 
 .close-button {
-  width: 32px;
-  height: 32px;
+  width: 24px;
+  height: 24px;
   border-radius: 50%;
   background: transparent;
-  color: var(--text-secondary);
-  font-size: var(--font-2xl);
+  color: var(--text-tertiary);
+  font-size: var(--font-lg);
   line-height: 1;
   padding: 0;
   border: none;
   cursor: pointer;
   transition: all var(--transition-fast);
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .close-button:hover {
-  background: var(--surface-alt);
+  background: var(--hover-bg);
   color: var(--text-primary);
-  transform: rotate(90deg);
 }
 
 .modal-body {
-  padding: var(--spacing-xl);
+  padding: var(--spacing-sm) var(--spacing-lg);
   overflow-y: auto;
-  flex: 1;
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 .modal-footer {
-  padding: var(--spacing-xl);
+  padding: var(--spacing-sm) var(--spacing-lg);
   border-top: 1px solid var(--border-color);
   display: flex;
-  gap: var(--spacing-md);
+  gap: var(--spacing-sm);
   justify-content: flex-end;
+  flex-shrink: 0;
 }
 
 /* Settings Modal */
 .settings-modal {
-  max-width: 700px;
+  max-width: 520px;
+}
+
+/* ============================================
+   Event Modal — Nextcloud-inspired layout
+   ============================================ */
+
+.event-modal {
+  max-width: 480px;
+  border-radius: var(--radius-xl);
+  overflow: hidden;
+}
+
+/* Header: color dot + calendar selector + close */
+.em-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border-color);
+  flex-shrink: 0;
+}
+
+.em-cal-picker {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.em-cal-dot {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  transition: background-color 0.2s ease;
+  box-shadow: 0 0 0 2px var(--surface), 0 0 0 3px var(--border-color);
+}
+
+.em-cal-select {
+  background: transparent;
+  border: none;
+  color: var(--text-primary);
+  font-weight: 600;
+  font-size: var(--font-base);
+  padding: 4px 8px;
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%239ca3af'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 4px center;
+  padding-right: 20px;
+}
+
+.em-cal-select:focus {
+  outline: none;
+  box-shadow: none;
+  border: none;
+}
+
+.em-close {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-tertiary);
+  font-size: 1.25rem;
+  line-height: 1;
+  padding: 0;
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s;
+}
+
+.em-close:hover {
+  background: var(--hover-bg);
+  color: var(--text-primary);
+}
+
+/* Body */
+.em-body {
+  padding: 16px;
+  overflow-y: auto;
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* Title input — prominent with left accent border */
+.em-title-input {
+  width: 100%;
+  font-size: 1.1rem;
+  font-weight: 600;
+  padding: 10px 14px;
+  border: 1.5px solid var(--border-color);
+  border-left: 4px solid var(--primary-color);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  color: var(--text-primary);
+  transition: all 0.15s;
+  font-family: inherit;
+}
+
+.em-title-input::placeholder {
+  color: var(--text-tertiary);
+  font-weight: 400;
+}
+
+.em-title-input:focus {
+  outline: none;
+  border-color: var(--primary-color);
+  box-shadow: 0 0 0 3px rgba(94, 114, 228, 0.12);
+}
+
+/* Date/Time section */
+.em-datetime-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: var(--surface-alt);
+  border-radius: var(--radius-md);
+  padding: 10px 12px;
+  border: 1px solid var(--border-color);
+}
+
+.em-dt-row {
+  display: grid;
+  grid-template-columns: 40px 1fr 1fr;
+  gap: 8px;
+  align-items: center;
+}
+
+.em-dt-label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.em-date-input,
+.em-time-input {
+  width: 100%;
+  padding: 6px 10px;
+  border: 1.5px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text-primary);
+  font-size: var(--font-sm);
+  font-family: inherit;
+  transition: border-color 0.15s;
+}
+
+.em-date-input:focus,
+.em-time-input:focus {
+  outline: none;
+  border-color: var(--primary-color);
+}
+
+/* Icon-prefixed field rows (location, description) */
+.em-field-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.em-field-row--top {
+  align-items: flex-start;
+}
+
+.em-field-icon {
+  font-size: 1.1rem;
+  flex-shrink: 0;
+  width: 24px;
+  text-align: center;
+  opacity: 0.7;
+}
+
+.em-field-input {
+  flex: 1;
+  padding: 8px 12px;
+  border: 1.5px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  color: var(--text-primary);
+  font-size: var(--font-sm);
+  font-family: inherit;
+  transition: border-color 0.15s;
+  width: 100%;
+}
+
+.em-field-input::placeholder {
+  color: var(--text-tertiary);
+}
+
+.em-field-input:focus {
+  outline: none;
+  border-color: var(--primary-color);
+}
+
+.em-desc {
+  resize: vertical;
+  min-height: 56px;
+  max-height: 140px;
+  line-height: 1.5;
+}
+
+/* Footer */
+.em-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 10px 16px;
+  border-top: 1px solid var(--border-color);
+  flex-shrink: 0;
+}
+
+.em-btn {
+  padding: 7px 18px;
+  border-radius: var(--radius-md);
+  font-size: var(--font-sm);
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  border: none;
+  transition: all 0.15s;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.em-btn--secondary {
+  background: var(--surface-alt);
+  color: var(--text-primary);
+  border: 1.5px solid var(--border-color);
+}
+
+.em-btn--secondary:hover {
+  background: var(--hover-bg);
+}
+
+.em-btn--primary {
+  background: var(--primary-color);
+  color: white;
+  box-shadow: 0 2px 8px rgba(94, 114, 228, 0.25);
+}
+
+.em-btn--primary:hover {
+  filter: brightness(1.1);
+  box-shadow: 0 3px 12px rgba(94, 114, 228, 0.35);
+}
+
+.em-btn--primary:active {
+  transform: scale(0.97);
 }
 
 .settings-content {
-  padding: var(--spacing-xl);
+  padding: var(--spacing-md) var(--spacing-lg);
   overflow-y: auto;
   flex: 1;
 }
 
 .settings-section {
-  margin-bottom: var(--spacing-xxl);
+  margin-bottom: var(--spacing-lg);
 }
 
 .settings-section:last-child {
@@ -935,33 +1202,36 @@ button {
 }
 
 .settings-section h3 {
-  font-size: var(--font-xl);
-  font-weight: 700;
-  color: var(--text-primary);
-  margin-bottom: var(--spacing-lg);
+  font-size: var(--font-xs);
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: var(--spacing-sm);
   display: flex;
   align-items: center;
-  gap: var(--spacing-sm);
-  padding-bottom: var(--spacing-sm);
-  border-bottom: 2px solid var(--border-color);
+  gap: var(--spacing-xs);
+  padding-bottom: var(--spacing-xs);
+  border-bottom: 1px solid var(--border-color);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
 }
 
 .setting-item {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: var(--spacing-md) 0;
-  gap: var(--spacing-lg);
+  padding: var(--spacing-xs) 0;
+  gap: var(--spacing-md);
 }
 
 .setting-item label {
   margin: 0;
   flex: 1;
+  font-size: var(--font-sm);
 }
 
 .setting-control {
   flex: 0 0 auto;
-  min-width: 200px;
+  min-width: 160px;
 }
 
 .color-picker-group {
@@ -971,12 +1241,12 @@ button {
 }
 
 .color-input {
-  width: 50px;
-  height: 40px;
-  border: 2px solid var(--border-color);
-  border-radius: var(--radius-md);
+  width: 36px;
+  height: 30px;
+  border: 1.5px solid var(--border-color);
+  border-radius: var(--radius-sm);
   cursor: pointer;
-  padding: 4px;
+  padding: 2px;
 }
 
 .color-text {
@@ -1030,8 +1300,8 @@ button {
 .toggle-switch {
   position: relative;
   display: inline-block;
-  width: 52px;
-  height: 28px;
+  width: 42px;
+  height: 22px;
   margin: 0;
 }
 
@@ -1056,10 +1326,10 @@ button {
 .toggle-slider:before {
   position: absolute;
   content: "";
-  height: 20px;
-  width: 20px;
-  left: 4px;
-  bottom: 4px;
+  height: 16px;
+  width: 16px;
+  left: 3px;
+  bottom: 3px;
   background-color: white;
   transition: var(--transition-fast);
   border-radius: 50%;
@@ -1070,14 +1340,14 @@ button {
 }
 
 .toggle-switch input:checked + .toggle-slider:before {
-  transform: translateX(24px);
+  transform: translateX(20px);
 }
 
 .settings-footer {
-  padding: var(--spacing-xl);
+  padding: var(--spacing-sm) var(--spacing-lg);
   border-top: 1px solid var(--border-color);
   display: flex;
-  gap: var(--spacing-md);
+  gap: var(--spacing-sm);
   justify-content: space-between;
 }
 
@@ -1934,7 +2204,7 @@ button:focus-visible {
   color: var(--text-tertiary);
 }
 
-.list-name-compact {
+.list-color-dot {\n  width: 8px;\n  height: 8px;\n  border-radius: 50%;\n  flex-shrink: 0;\n}\n\n.list-name-compact {
   flex: 1;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1956,9 +2226,11 @@ button:focus-visible {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  padding: 0.5rem 0.75rem;
+  padding: 0.5rem 0.75rem 0.5rem 1rem;
   cursor: grab;
-  transition: all 200ms cubic-bezier(0.4, 0, 0.2, 1);
+  transition: background 200ms cubic-bezier(0.4, 0, 0.2, 1),
+              box-shadow 200ms cubic-bezier(0.4, 0, 0.2, 1),
+              opacity 200ms cubic-bezier(0.4, 0, 0.2, 1);
   border-radius: var(--radius-sm);
   margin: 0 0.375rem 0.25rem;
   position: relative;
@@ -1968,16 +2240,17 @@ button:focus-visible {
   content: '';
   position: absolute;
   left: 0;
-  top: 0;
-  bottom: 0;
-  width: 0;
-  background: var(--primary-color);
-  border-radius: 4px 0 0 4px;
-  transition: width 200ms cubic-bezier(0.16, 1, 0.3, 1);
+  top: 4px;
+  bottom: 4px;
+  width: 3px;
+  background: var(--list-color, var(--primary-color));
+  border-radius: 2px;
+  opacity: 0.7;
+  transition: opacity 200ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .sidebar-task-item:hover::before {
-  width: 3px;
+  opacity: 1;
 }
 
 .sidebar-task-item:active {
@@ -1986,13 +2259,11 @@ button:focus-visible {
 
 .sidebar-task-item[draggable="true"]:hover {
   background: var(--hover-bg);
-  transform: translateX(4px);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
 }
 
 .sidebar-task-item:hover {
   background: var(--hover-bg);
-  transform: translateX(4px);
 }
 
 .sidebar-task-item.completed {
@@ -2026,9 +2297,9 @@ button:focus-visible {
 }
 
 .task-drag-handle {
-  color: var(--text-tertiary);
+  color: var(--text-secondary);
   font-size: 0.9rem;
-  opacity: 0.4;
+  opacity: 0.5;
   transition: all var(--transition-fast);
   cursor: grab;
   user-select: none;
@@ -2264,7 +2535,7 @@ button:focus-visible {
   border-radius: 50%;
   border: none;
   background: var(--surface-alt);
-  color: var(--text-tertiary);
+  color: var(--text-secondary);
   font-size: 0.75rem;
   cursor: pointer;
   display: flex;
@@ -2306,6 +2577,61 @@ button:focus-visible {
   color: var(--primary-color);
 }
 
+/* Delete list button — hidden until hover */
+.sidebar-delete-list-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  font-size: 0.7rem;
+  padding: 2px;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  transition: all var(--transition-fast);
+  opacity: 0;
+}
+
+.task-list-header-compact:hover .sidebar-delete-list-btn {
+  opacity: 1;
+}
+
+.sidebar-delete-list-btn:hover {
+  background: rgba(245, 54, 92, 0.1);
+  color: var(--error);
+}
+
+/* Delete task button — hidden until hover */
+.task-delete-btn {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-size: 0.65rem;
+  transition: all var(--transition-fast);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  padding: 0;
+  color: var(--text-tertiary);
+}
+
+.sidebar-task-item:hover .task-delete-btn {
+  opacity: 1;
+}
+
+.task-delete-btn:hover {
+  background: rgba(245, 54, 92, 0.1);
+  color: var(--error);
+  transform: scale(1.1);
+}
+
 .sidebar-task-items {
   padding: 0 0.25rem;
 }
@@ -2327,6 +2653,110 @@ button:focus-visible {
     opacity: 1;
     transform: translateY(0);
   }
+}
+
+/* ============================================
+   Task Delete Confirmation Dialog
+   ============================================ */
+.task-confirm-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.35);
+  z-index: 2000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: confirmOverlayIn 150ms ease;
+  backdrop-filter: blur(2px);
+}
+
+@keyframes confirmOverlayIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.task-confirm-dialog {
+  background: var(--surface);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-xl);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.2), 0 4px 12px rgba(0, 0, 0, 0.1);
+  padding: 1.25rem 1.5rem;
+  min-width: 280px;
+  max-width: 340px;
+  text-align: center;
+  animation: confirmDialogIn 200ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes confirmDialogIn {
+  from {
+    opacity: 0;
+    transform: scale(0.92) translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+.task-confirm-icon {
+  font-size: 1.75rem;
+  margin-bottom: 0.5rem;
+}
+
+.task-confirm-title {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 0.375rem;
+}
+
+.task-confirm-message {
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+  line-height: 1.45;
+  margin-bottom: 1rem;
+}
+
+.task-confirm-actions {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: center;
+}
+
+.task-confirm-btn {
+  padding: 0.4rem 1.1rem;
+  border-radius: var(--radius-md);
+  font-size: 0.8rem;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  border: none;
+  transition: all 150ms ease;
+}
+
+.task-confirm-cancel {
+  background: var(--surface-alt);
+  color: var(--text-primary);
+  border: 1.5px solid var(--border-color);
+}
+
+.task-confirm-cancel:hover {
+  background: var(--hover-bg);
+}
+
+.task-confirm-delete {
+  background: #f5365c;
+  color: white;
+  box-shadow: 0 2px 8px rgba(245, 54, 92, 0.3);
+}
+
+.task-confirm-delete:hover {
+  background: #e8234d;
+  box-shadow: 0 3px 12px rgba(245, 54, 92, 0.4);
+}
+
+.task-confirm-delete:active {
+  transform: scale(0.96);
 }
 
 .new-list-form input,

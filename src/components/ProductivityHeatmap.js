@@ -1,14 +1,45 @@
-// Productivity Heatmap Component — GitHub-style activity grid + streak counter
+// ============================================================================
+// ProductivityHeatmap Component — ProductivityHeatmap.js
+// ============================================================================
+// GitHub-style activity grid showing 12 weeks (84 days) of event/task activity.
+// Displayed in the Activity tab of the sidebar.
+//
+// Features:
+//   - Color-coded cells (4 intensity levels) based on daily event count
+//   - Streak counter (🔥 X) showing consecutive active days
+//   - Monthly total events counter
+//   - Hover tooltip with date and activity level
+//   - Legend (Less ─ More) for intensity reference
+//
+// Activity data is cached to avoid recalculating on every render.
+// Completed tasks count as 0.5 events for a blended activity score.
+// ============================================================================
+
 class ProductivityHeatmap extends React.Component {
   constructor(props) {
     super(props);
     this.state = {
       hoveredDay: null,
     };
+    // Cache for activity data to avoid recalculating on every render
+    this._cachedEvents = null;
+    this._cachedTaskLists = null;
+    this._cachedActivityMap = null;
   }
 
+  /**
+   * getActivityData — Builds a map of "YYYY-MM-DD" → activity count.
+   * Counts events (1 each) and completed tasks (0.5 each).
+   * Results are cached and only recalculated when props change.
+   */
   getActivityData() {
     const { events, taskLists } = this.props;
+
+    // Return cached result if inputs haven't changed
+    if (this._cachedEvents === events && this._cachedTaskLists === taskLists && this._cachedActivityMap) {
+      return this._cachedActivityMap;
+    }
+
     const activityMap = {}; // "YYYY-MM-DD" -> count
 
     // Count events per day
@@ -36,9 +67,18 @@ class ProductivityHeatmap extends React.Component {
       });
     }
 
+    // Cache the result
+    this._cachedEvents = events;
+    this._cachedTaskLists = taskLists;
+    this._cachedActivityMap = activityMap;
+
     return activityMap;
   }
 
+  /**
+   * getStreak — Calculates the current consecutive-day activity streak.
+   * Counts backwards from today (or yesterday if today has no activity).
+   */
   getStreak() {
     const activityMap = this.getActivityData();
     const today = new Date();

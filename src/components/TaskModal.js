@@ -1,4 +1,16 @@
-// Task Modal Component - Edit tasks and add them to calendar
+// ============================================================================
+// TaskModal Component — TaskModal.js
+// ============================================================================
+// Modal dialog for editing task details and optionally adding them to the
+// calendar as events. Fields include:
+//   - Task name, due date, time, duration, notes
+//   - "Add to calendar" checkbox (creates a VEVENT from the task)
+//
+// When "Add to calendar" is checked and due date/time are set, the submit
+// handler calls onAddToCalendar() instead of onSubmit(), creating an event
+// with the task's details and configured duration.
+// ============================================================================
+
 class TaskModal extends React.Component {
   constructor(props) {
     super(props);

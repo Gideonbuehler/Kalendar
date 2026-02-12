@@ -1,4 +1,15 @@
-// Calendar Settings Modal Component
+// ============================================================================
+// CalendarSettingsModal Component — CalendarSettingsModal.js
+// ============================================================================
+// Per-calendar settings modal with two tabs:
+//   1. General: Rename calendar, change color (16-color palette)
+//   2. Sharing: Share with other users by email (read/write permissions)
+//
+// Note: Sharing functionality requires specific Nextcloud server configuration
+// and may not work on all setups. The UI is present but sharing operations
+// may fail silently on incompatible servers.
+// ============================================================================
+
 class CalendarSettingsModal extends React.Component {
   constructor(props) {
     super(props);
@@ -11,29 +22,29 @@ class CalendarSettingsModal extends React.Component {
       shares: props.calendar?.shares || [],
     };
   }
-
+  // Handle change in calendar color
   handleColorChange = (color) => {
     this.setState({ selectedColor: color });
   };
-
+  // Handle change in calendar name
   handleNameChange = (e) => {
     this.setState({ calendarName: e.target.value });
   };
-
+  // Handle save for calendar color
   handleSaveColor = () => {
     const { calendar, onUpdateColor } = this.props;
     if (onUpdateColor) {
       onUpdateColor(calendar.url, this.state.selectedColor);
     }
   };
-
+  // Handle save for calendar name
   handleSaveName = () => {
     const { calendar, onUpdateName } = this.props;
     if (onUpdateName) {
       onUpdateName(calendar.url, this.state.calendarName);
     }
   };
-
+  // Handle adding a new share (doesnt really work yet due to Nextcloud API compatibility issues - requires specific configuration on the Nextcloud server)
   handleAddShare = () => {
     const { shareEmail, sharePermission } = this.state;
     if (!shareEmail) {
@@ -52,7 +63,7 @@ class CalendarSettingsModal extends React.Component {
       this.setState({ shareEmail: "", sharePermission: "read" });
     }
   };
-
+  // Delete a share (doesnt really work yet due to Nextcloud API compatibility issues - requires specific configuration on the Nextcloud server) 
   handleRemoveShare = (shareId) => {
     const { calendar, onRemoveShare } = this.props;
     if (onRemoveShare && confirm("Remove this share?")) {
@@ -92,7 +103,7 @@ class CalendarSettingsModal extends React.Component {
       "#ff9ff3",
       "#54a0ff",
     ];
-
+    // Setting window that shows up when you click the settings icon on a calendar - allows you to change the calendar name and color, as well as share the calendar with other users (sharing functionality is currently disabled due to Nextcloud API compatibility issues - requires specific configuration on the Nextcloud server)
     return React.createElement(
       "div",
       { className: "modal-overlay", onClick: onClose },
@@ -331,7 +342,7 @@ class CalendarSettingsModal extends React.Component {
               )
             )
         ),
-
+        // Footer with close button
         React.createElement(
           "div",
           { className: "modal-footer" },

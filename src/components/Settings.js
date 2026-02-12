@@ -1,4 +1,14 @@
-// Settings Component
+// ============================================================================
+// Settings Component — Settings.js
+// ============================================================================
+// Full-screen modal for configuring application preferences.
+// Organized into two sections:
+//   1. Appearance: Theme, primary/accent colors, font size, animations, compact mode
+//   2. Calendar: First day of week, time format, default view, task duration
+// Changes are applied in real-time via onSettingChange (debounced save).
+// Includes a "Reset to Defaults" button.
+// ============================================================================
+
 class Settings extends React.Component {
   render() {
     const { settings, onSettingChange, onClose, onReset } = this.props;
