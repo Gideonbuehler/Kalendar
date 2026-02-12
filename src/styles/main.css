@@ -926,7 +926,7 @@ button {
 
 /* Settings Modal */
 .settings-modal {
-  max-width: 700px;
+  max-width: 520px;
 }
 
 /* ============================================
@@ -1188,13 +1188,13 @@ button {
 }
 
 .settings-content {
-  padding: var(--spacing-xl);
+  padding: var(--spacing-md) var(--spacing-lg);
   overflow-y: auto;
   flex: 1;
 }
 
 .settings-section {
-  margin-bottom: var(--spacing-xxl);
+  margin-bottom: var(--spacing-lg);
 }
 
 .settings-section:last-child {
@@ -1202,13 +1202,13 @@ button {
 }
 
 .settings-section h3 {
-  font-size: var(--font-sm);
+  font-size: var(--font-xs);
   font-weight: 600;
   color: var(--text-secondary);
-  margin-bottom: var(--spacing-md);
+  margin-bottom: var(--spacing-sm);
   display: flex;
   align-items: center;
-  gap: var(--spacing-sm);
+  gap: var(--spacing-xs);
   padding-bottom: var(--spacing-xs);
   border-bottom: 1px solid var(--border-color);
   text-transform: uppercase;
@@ -1219,18 +1219,19 @@ button {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: var(--spacing-md) 0;
-  gap: var(--spacing-lg);
+  padding: var(--spacing-xs) 0;
+  gap: var(--spacing-md);
 }
 
 .setting-item label {
   margin: 0;
   flex: 1;
+  font-size: var(--font-sm);
 }
 
 .setting-control {
   flex: 0 0 auto;
-  min-width: 200px;
+  min-width: 160px;
 }
 
 .color-picker-group {
@@ -1240,12 +1241,12 @@ button {
 }
 
 .color-input {
-  width: 50px;
-  height: 40px;
-  border: 2px solid var(--border-color);
-  border-radius: var(--radius-md);
+  width: 36px;
+  height: 30px;
+  border: 1.5px solid var(--border-color);
+  border-radius: var(--radius-sm);
   cursor: pointer;
-  padding: 4px;
+  padding: 2px;
 }
 
 .color-text {
@@ -1299,8 +1300,8 @@ button {
 .toggle-switch {
   position: relative;
   display: inline-block;
-  width: 52px;
-  height: 28px;
+  width: 42px;
+  height: 22px;
   margin: 0;
 }
 
@@ -1325,10 +1326,10 @@ button {
 .toggle-slider:before {
   position: absolute;
   content: "";
-  height: 20px;
-  width: 20px;
-  left: 4px;
-  bottom: 4px;
+  height: 16px;
+  width: 16px;
+  left: 3px;
+  bottom: 3px;
   background-color: white;
   transition: var(--transition-fast);
   border-radius: 50%;
@@ -1339,11 +1340,11 @@ button {
 }
 
 .toggle-switch input:checked + .toggle-slider:before {
-  transform: translateX(24px);
+  transform: translateX(20px);
 }
 
 .settings-footer {
-  padding: var(--spacing-md) var(--spacing-lg);
+  padding: var(--spacing-sm) var(--spacing-lg);
   border-top: 1px solid var(--border-color);
   display: flex;
   gap: var(--spacing-sm);
@@ -2576,6 +2577,61 @@ button:focus-visible {
   color: var(--primary-color);
 }
 
+/* Delete list button — hidden until hover */
+.sidebar-delete-list-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  font-size: 0.7rem;
+  padding: 2px;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  transition: all var(--transition-fast);
+  opacity: 0;
+}
+
+.task-list-header-compact:hover .sidebar-delete-list-btn {
+  opacity: 1;
+}
+
+.sidebar-delete-list-btn:hover {
+  background: rgba(245, 54, 92, 0.1);
+  color: var(--error);
+}
+
+/* Delete task button — hidden until hover */
+.task-delete-btn {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-size: 0.65rem;
+  transition: all var(--transition-fast);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  padding: 0;
+  color: var(--text-tertiary);
+}
+
+.sidebar-task-item:hover .task-delete-btn {
+  opacity: 1;
+}
+
+.task-delete-btn:hover {
+  background: rgba(245, 54, 92, 0.1);
+  color: var(--error);
+  transform: scale(1.1);
+}
+
 .sidebar-task-items {
   padding: 0 0.25rem;
 }
@@ -2597,6 +2653,110 @@ button:focus-visible {
     opacity: 1;
     transform: translateY(0);
   }
+}
+
+/* ============================================
+   Task Delete Confirmation Dialog
+   ============================================ */
+.task-confirm-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.35);
+  z-index: 2000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: confirmOverlayIn 150ms ease;
+  backdrop-filter: blur(2px);
+}
+
+@keyframes confirmOverlayIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.task-confirm-dialog {
+  background: var(--surface);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-xl);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.2), 0 4px 12px rgba(0, 0, 0, 0.1);
+  padding: 1.25rem 1.5rem;
+  min-width: 280px;
+  max-width: 340px;
+  text-align: center;
+  animation: confirmDialogIn 200ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes confirmDialogIn {
+  from {
+    opacity: 0;
+    transform: scale(0.92) translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+.task-confirm-icon {
+  font-size: 1.75rem;
+  margin-bottom: 0.5rem;
+}
+
+.task-confirm-title {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 0.375rem;
+}
+
+.task-confirm-message {
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+  line-height: 1.45;
+  margin-bottom: 1rem;
+}
+
+.task-confirm-actions {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: center;
+}
+
+.task-confirm-btn {
+  padding: 0.4rem 1.1rem;
+  border-radius: var(--radius-md);
+  font-size: 0.8rem;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  border: none;
+  transition: all 150ms ease;
+}
+
+.task-confirm-cancel {
+  background: var(--surface-alt);
+  color: var(--text-primary);
+  border: 1.5px solid var(--border-color);
+}
+
+.task-confirm-cancel:hover {
+  background: var(--hover-bg);
+}
+
+.task-confirm-delete {
+  background: #f5365c;
+  color: white;
+  box-shadow: 0 2px 8px rgba(245, 54, 92, 0.3);
+}
+
+.task-confirm-delete:hover {
+  background: #e8234d;
+  box-shadow: 0 3px 12px rgba(245, 54, 92, 0.4);
+}
+
+.task-confirm-delete:active {
+  transform: scale(0.96);
 }
 
 .new-list-form input,

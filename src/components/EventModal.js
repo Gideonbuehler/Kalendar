@@ -43,6 +43,7 @@ class EventModal extends React.Component {
    * On change, makeDate() recombines them and calls onDateChange().
    */
   render() {
+    const { newEvent, calendars, onSubmit, onClose, onInputChange, onDateChange, onCalendarChange, isLoading, isEditMode } = this.props;
 
     // Resolve calendar color for the header dot and save button
     const calColor = this._getCalColor();
