@@ -319,6 +319,24 @@ class CalendarView extends React.Component {
       }
     });
   };
+  /**
+   * _getEventCalendarColor — Resolves the calendar color for an event.
+   * Looks up by calendarUrl in the calendars array, falls back to a
+   * hash-based color from the calendar name, or returns null.
+   */
+  _getEventCalendarColor = (event) => {
+    const { calendars } = this.props;
+    if (!calendars || !event.calendarUrl) return null;
+    const cal = calendars.find((c) => c.url === event.calendarUrl);
+    if (!cal) return null;
+    if (cal.color) return cal.color;
+    // Hash-based fallback from calendar name
+    const colors = ["#5e72e4","#11cdef","#2dce89","#fb6340","#f5365c","#ffd600","#8965e0","#f3a4b5"];
+    const name = cal.displayName || "";
+    const idx = name.split("").reduce((a, c) => a + c.charCodeAt(0), 0);
+    return colors[idx % colors.length];
+  };
+
   // Helper to customize day/time slot rendering to show preview
   eventPropGetter = (event, start, end, isSelected) => {
     if (event.isPreview) {
@@ -333,6 +351,9 @@ class CalendarView extends React.Component {
       };
     }
 
+    // Look up the calendar color for this event
+    const calColor = this._getEventCalendarColor(event);
+
     // Completed task events get a special visual treatment
     if (event.completed) {
       return {
@@ -341,6 +362,8 @@ class CalendarView extends React.Component {
           opacity: 0.6,
           textDecoration: "line-through",
           filter: "grayscale(40%)",
+          boxShadow: calColor ? `inset 5px 0 0 0 ${calColor}` : undefined,
+          paddingLeft: calColor ? '12px' : undefined,
         },
       };
     }
@@ -352,34 +375,38 @@ class CalendarView extends React.Component {
     let timeBg = null;
 
     if (hour >= 5 && hour < 9) {
-      // Early morning — sunrise warm orange
       timeClass = "rbc-event-morning-early";
       timeBg = "linear-gradient(135deg, #f6d365 0%, #fda085 100%)";
     } else if (hour >= 9 && hour < 12) {
-      // Morning — energetic warm
       timeClass = "rbc-event-morning";
       timeBg = "linear-gradient(135deg, #fa709a 0%, #fee140 100%)";
     } else if (hour >= 12 && hour < 14) {
-      // Midday — vibrant
       timeClass = "rbc-event-midday";
       timeBg = "linear-gradient(135deg, #a18cd1 0%, #fbc2eb 100%)";
     } else if (hour >= 14 && hour < 17) {
-      // Afternoon — balanced
       timeClass = "rbc-event-afternoon";
       timeBg = "linear-gradient(135deg, #667eea 0%, #764ba2 100%)";
     } else if (hour >= 17 && hour < 20) {
-      // Evening — sunset cool
       timeClass = "rbc-event-evening";
       timeBg = "linear-gradient(135deg, #f093fb 0%, #f5576c 100%)";
     } else {
-      // Night — deep cool
       timeClass = "rbc-event-night";
       timeBg = "linear-gradient(135deg, #4facfe 0%, #00f2fe 100%)";
     }
 
+    const style = timeBg
+      ? { background: timeBg, color: "white" }
+      : {};
+
+    // Add calendar color left border strip via box-shadow
+    if (calColor) {
+      style.boxShadow = `inset 5px 0 0 0 ${calColor}, 0 1px 3px rgba(0,0,0,0.1)`;
+      style.paddingLeft = '12px';
+    }
+
     return {
       className: timeClass,
-      style: timeBg ? { background: timeBg, border: "none", color: "white" } : {},
+      style,
     };
   };
   handleTaskDragStart = (dragData) => {

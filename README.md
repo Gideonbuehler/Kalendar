@@ -1,10 +1,10 @@
-# 📅 Kalendar
+# Kalendar
 
 A beautiful, highly customizable desktop calendar application for Nextcloud built with Electron and React.
 
-## ✨ Features
+## Features
 
-### 🎨 Highly Customizable
+### Highly Customizable
 
 - **Dark Mode** - Full dark theme support with auto-detection
 - **Custom Colors** - Choose your own primary and accent colors
@@ -12,45 +12,82 @@ A beautiful, highly customizable desktop calendar application for Nextcloud buil
 - **Compact Mode** - Reduce spacing for a more condensed view
 - **Animations** - Toggle smooth transitions and animations
 
-### 📆 Calendar Features
+### Calendar Features
 
 - **Multiple Views** - Month, Week, Day, and Agenda views
-- **Event Creation** - Create events with title, time, location, and description
-- **Multiple Calendars** - Support for multiple Nextcloud calendars
-- **Real-time Sync** - Sync events with your Nextcloud server
+- **Event Creation & Editing** - Create events with title, time, location, and description
+- **Multiple Calendars** - Support for multiple Nextcloud calendars with color-coded display
+- **Real-time Sync** - Sync events with your Nextcloud server via CalDAV
+- **Drag & Drop** - Reschedule events by dragging, drop tasks onto the calendar
 - **Week Numbers** - Optional week number display
 - **Customizable First Day** - Start week on Sunday or Monday
 - **Time Formats** - Choose between 12-hour and 24-hour formats
+- **Time-of-Day Gradients** - Events are color-coded by time of day
+- **Next Event Countdown** - Live countdown in the header with hover dropdown for all upcoming events
 
-### 🔐 Secure
+### Task Management
+
+- **Task Lists** - Create and manage multiple task lists with color-coded dots
+- **Inline Task Creation** - Add tasks and lists without leaving the sidebar
+- **Task Completion** - Toggle tasks as done with progress counters
+- **Drag to Calendar** - Drag tasks onto the calendar to schedule them as events
+- **Custom Delete Confirmation** - Themed confirmation dialog for deletions
+- **Cascade Deletion** - Deleting a list removes all its tasks and associated calendar events
+
+### Sidebar
+
+- **Mini Calendar** - Compact month view with event indicators
+- **Day Timeline** - Horizontal timeline of the selected day's events
+- **Calendar List** - Toggle visibility of individual calendars
+- **Productivity Heatmap** - Visual overview of your activity
+- **Event Insights** - Statistics about your calendar usage
+
+### Secure
 
 - **App Password Support** - Use Nextcloud app-specific passwords
 - **Local Settings** - All preferences stored locally
 - **Secure Authentication** - CalDAV protocol with proper authentication
 
-## 🏗️ Project Structure
+## Project Structure
 
 ```
 kalendar/
 ├── src/
-│   ├── components/          # React components
-│   │   ├── LoginForm.js     # Login interface
-│   │   ├── CalendarView.js  # Main calendar display
-│   │   ├── EventModal.js    # Event creation modal
-│   │   └── Settings.js      # Settings panel
-│   ├── services/            # Business logic
-│   │   ├── caldavService.js # CalDAV operations
-│   │   └── settingsService.js # Settings management
-│   └── styles/
-│       └── main.css         # Application styles
-├── main.js                  # Electron main process
-├── index.html              # Entry point
-└── package.json            # Dependencies
+│   ├── app.js                    # Main application component & state
+│   ├── components/
+│   │   ├── CalendarView.js       # Main calendar display & sidebar layout
+│   │   ├── CalendarSettingsModal.js # Calendar-specific settings
+│   │   ├── ContextMenu.js        # Right-click context menu
+│   │   ├── CreateCalendarModal.js # New calendar creation
+│   │   ├── DayTimeline.js        # Compact day overview in sidebar
+│   │   ├── EventInsights.js      # Calendar usage statistics
+│   │   ├── EventModal.js         # Event creation/editing modal
+│   │   ├── LoginForm.js          # Login interface
+│   │   ├── MiniCalendar.js       # Sidebar mini calendar with tabs
+│   │   ├── NextEventCountdown.js # Live countdown with dropdown
+│   │   ├── ProductivityHeatmap.js # Activity heatmap
+│   │   ├── Settings.js           # Settings panel
+│   │   ├── TaskManager.js        # Task list management
+│   │   └── TaskModal.js          # Task editing modal
+│   ├── services/
+│   │   ├── caldavService.js      # CalDAV operations
+│   │   ├── settingsService.js    # Settings persistence
+│   │   └── webdavService.js      # WebDAV operations
+│   ├── styles/
+│   │   ├── main.css              # Application styles
+│   │   └── theme.css             # Theme variables & component themes
+│   └── utils/
+│       └── helpers.js            # Utility functions
+├── main.js                       # Electron main process
+├── renderer.js                   # Renderer process bootstrap
+├── index.html                    # Entry point
+├── styles.css                    # Root styles
+└── package.json                  # Dependencies
 ```
 
-## 🚀 Getting Started
+## Getting Started
 
-#### Prerequisites
+### Prerequisites
 
 - Node.js (v16 or higher)
 - npm or yarn
@@ -58,10 +95,10 @@ kalendar/
 
 ### Installation
 
-1. Navigate to the project directory:
+1. Clone the repository and navigate to the project directory:
 
 ```bash
-cd nextcloud-calendar-app
+cd Kalendar
 ```
 
 2. Install dependencies:
@@ -85,9 +122,9 @@ npm start
 
 The app will automatically append the CalDAV path (`/remote.php/dav`) to your server URL.
 
-## ⚙️ Settings
+## Settings
 
-Access settings by clicking the gear icon (⚙️) in the top-right corner.
+Access settings by clicking the gear icon (⚙️) in the header.
 
 ### Appearance Settings
 
@@ -103,15 +140,10 @@ Access settings by clicking the gear icon (⚙️) in the top-right corner.
 - **First Day of Week**: Sunday or Monday
 - **Time Format**: 12-hour or 24-hour
 - **Default View**: Month, Week, Day, or Agenda
+- **Default Task Duration**: 5 minutes to 2 hours
 - **Show Week Numbers**: Display week numbers in calendar
 
-## 📝 License
-
-MIT License - feel free to use this project for personal or commercial purposes.
-
----
-
-Made with ❤️ for the Nextcloud community
+## App Password Setup
 
 For better security, create an App Password in Nextcloud:
 
@@ -119,54 +151,40 @@ For better security, create an App Password in Nextcloud:
 2. Click your profile picture → Settings
 3. Go to Security section
 4. Scroll to "Devices & sessions"
-5. Create a new app password named "Desktop Calendar App"
+5. Create a new app password named "Kalendar"
 6. Use this password in the app instead of your main password
 
 ## Using the App
 
 ### Viewing Events
 
-- The calendar displays all events from your Nextcloud calendar
-- Use the navigation buttons to switch between months
+- The calendar displays all events from your Nextcloud calendars
+- Use the navigation buttons to switch between months/weeks/days
 - Change views using the Month/Week/Day/Agenda buttons
+- Toggle individual calendars on/off in the sidebar
 
 ### Creating Events
 
 1. Click and drag on the calendar to select a time slot
-2. A modal will appear
-3. Fill in the event details:
-   - Title (required)
-   - Start and end times
-   - Description
-   - Location
-4. Click "Create Event"
-5. The event will be synced to your Nextcloud server
+2. Fill in the event details (title, time, location, description)
+3. Select which calendar to add it to
+4. Click "Create"
 
-### Multiple Calendars
+### Managing Tasks
 
-If you have multiple calendars in Nextcloud, use the dropdown in the header to switch between them.
+1. Click "+" in the Tasks section to create a new task list
+2. Expand a list and click "+" to add tasks
+3. Check tasks to mark them as complete
+4. Drag tasks onto the calendar to schedule them
+5. Delete tasks or lists with the ✕ button (with confirmation)
 
-## Building for Production
-
-To build standalone executables for your platform:
+### Building for Production
 
 ```bash
 npm run build
 ```
 
 This will create distributable packages in the `dist` folder.
-
-## Project Structure
-
-```
-nextcloud-calendar-app/
-├── main.js           # Electron main process (CalDAV connection logic)
-├── renderer.js       # React UI components
-├── index.html        # HTML entry point
-├── styles.css        # Application styles
-├── package.json      # Dependencies and scripts
-└── README.md         # This file
-```
 
 ## Technologies Used
 
@@ -189,26 +207,8 @@ nextcloud-calendar-app/
 ### Events Not Appearing
 
 - Click the "Refresh" button to manually sync
-- Check that the correct calendar is selected
-- Verify events exist in the web interface
-
-### SSL Certificate Issues
-
-If you're using a self-signed certificate, you may need to configure Node to accept it. This is not recommended for production use.
-
-## Future Enhancements
-
-Possible features to add:
-
-- Edit and delete existing events
-- Recurring event support
-- Event reminders and notifications
-- Offline mode with local caching
-- Dark mode
-- Multiple account support
-- Event search and filtering
-- Drag-and-drop event rescheduling
-- Import/export calendar files
+- Check that the correct calendars are toggled on in the sidebar
+- Verify events exist in the Nextcloud web interface
 
 ## Security Notes
 

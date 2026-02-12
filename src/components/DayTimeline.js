@@ -7,10 +7,13 @@ class DayTimeline extends React.Component {
 
   _isSameDay(d1, d2) {
     if (!d1 || !d2) return false;
+    const a = d1 instanceof Date ? d1 : new Date(d1);
+    const b = d2 instanceof Date ? d2 : new Date(d2);
+    if (isNaN(a.getTime()) || isNaN(b.getTime())) return false;
     return (
-      d1.getFullYear() === d2.getFullYear() &&
-      d1.getMonth() === d2.getMonth() &&
-      d1.getDate() === d2.getDate()
+      a.getFullYear() === b.getFullYear() &&
+      a.getMonth() === b.getMonth() &&
+      a.getDate() === b.getDate()
     );
   }
 
