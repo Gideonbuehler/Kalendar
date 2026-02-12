@@ -1,6 +1,6 @@
 // Main Application Component
 const { ipcRenderer } = require("electron");
-const { Component, createElement: h } = React;
+const { Component } = React;
 const { Calendar } = ReactBigCalendar;
 const { momentLocalizer } = ReactBigCalendar;
 const { DragDropContext } = window.ReactDnD || {};
@@ -106,8 +106,7 @@ class KalendarApp extends Component {
       ],
       showTaskManager: false,
       showTaskModal: false,
-      editingTaskListId: null,
-      editingTask: null, // Settings
+      editingTaskListId: null,      editingTask: null, // Settings
       settings: {
         theme: "light",
         primaryColor: "#5e72e4",
@@ -120,11 +119,15 @@ class KalendarApp extends Component {
         compactMode: false,
         animations: true,
         defaultTaskDuration: 15, // minutes
-      },
+      },      // Creative features
+      currentView: "month",
     };
   }
-
   async componentDidMount() {
+    // Global keyboard shortcuts (reserved for future use)
+    this._handleKeyDown = (e) => {};
+    document.addEventListener("keydown", this._handleKeyDown);
+
     // Load settings from main process
     const result = await ipcRenderer.invoke("get-settings");
     if (result.success) {
@@ -1489,9 +1492,51 @@ class KalendarApp extends Component {
       },
     });
   };
-
   // ============================================
   // End Task Management Handlers
+  // ============================================
+  // ============================================
+  // Creative Feature Handlers
+  // ============================================
+
+  handleChangeView = (view) => {
+    this.setState({ currentView: view });
+  };
+
+  handleDateNavigate = (date) => {
+    this.setState({ currentDate: date });
+  };
+
+  handleSettingChange = (key, value) => {
+    const newSettings = { ...this.state.settings, [key]: value };
+    this.setState({ settings: newSettings }, () => {
+      this.applySettings();
+      ipcRenderer.invoke("save-settings", newSettings);
+    });
+  };
+
+  handleResetSettings = () => {
+    const defaults = {
+      theme: "light",
+      primaryColor: "#5e72e4",
+      accentColor: "#11cdef",
+      fontSize: "medium",
+      firstDayOfWeek: 0,
+      timeFormat: "12h",
+      defaultView: "month",
+      showWeekNumbers: false,
+      compactMode: false,
+      animations: true,
+      defaultTaskDuration: 15,
+    };
+    this.setState({ settings: defaults }, () => {
+      this.applySettings();
+      ipcRenderer.invoke("save-settings", defaults);
+    });
+  };
+
+  // ============================================
+  // End Creative Feature Handlers
   // ============================================
 
   formatDateTimeLocal = (date) => {
@@ -1514,12 +1559,10 @@ class KalendarApp extends Component {
         isLoading: this.state.isLoading,
         errorMessage: this.state.errorMessage,
       });
-    }
-
-    // The root div is now the CalendarView itself, no extra div needed
+    }    // The root div is now the CalendarView itself, no extra div needed
     return h(
       "div",
-      { className: "kalendar-app-wrapper" }, // Use a different, non-flex wrapper if needed, or just return the component.
+      { className: "kalendar-app-wrapper" },
       h(CalendarView, {
         localizer: localizer,
         events: this.state.events,
@@ -1531,6 +1574,7 @@ class KalendarApp extends Component {
         isLoading: this.state.isLoading,
         taskLists: this.state.taskLists,
         showTaskManager: this.state.showTaskManager,
+        currentView: this.state.currentView,
         onSelectSlot: this.handleSelectSlot,
         onSelectEvent: this.handleContextMenu,
         onEventDrop: this.handleEventDrop,
@@ -1550,8 +1594,8 @@ class KalendarApp extends Component {
         onAddTaskList: this.handleAddTaskList,
         onToggleTask: this.handleToggleTask,
         onTaskToCalendar: this.handleTaskToCalendar,
-        onTaskClick: this.handleTaskClick,
-        onTaskDroppedOnCalendar: this.handleTaskDroppedOnCalendar,
+        onTaskClick: this.handleTaskClick,        onTaskDroppedOnCalendar: this.handleTaskDroppedOnCalendar,
+        onViewChange: this.handleChangeView,
       }),
 
       // Task Manager removed - now integrated in sidebar
@@ -1642,22 +1686,7 @@ class KalendarApp extends Component {
             this.setState({
               showTaskModal: false,
               editingTaskListId: null,
-              editingTask: null,
-            }),
-        }),
-      h(
-        "div",
-        { className: "sidebar-footer" },
-        h(
-          "button",
-          {
-            className: "btn btn-outline-danger btn-block",
-            onClick: this.handleLogout,
-          },
-          h("i", { className: "fas fa-sign-out-alt" }),
-          " Logout"
-        )
-      )
+              editingTask: null,            }),        })
     );
   }
 }
