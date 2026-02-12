@@ -12,8 +12,244 @@ class CalendarView extends React.Component {
     };
     this._rafId = null; // For requestAnimationFrame-based drag over updates    this._lastPreviewTime = null; // Track last preview start time to avoid redundant setState
     this._dropHandled = false; // Flag to prevent handleGlobalDragEnd from clearing after a successful drop
+  }  componentDidMount() {
+    // Use native event listeners in CAPTURE phase so that drop events
+    // are intercepted before ReactBigCalendar's internal elements can
+    // swallow them. React's synthetic onDrop uses bubbling, which doesn't
+    // reach the wrapper when a child element prevents propagation.
+    this._nativeDragOver = (e) => {
+      // Only intercept if we have a task being dragged
+      if (this.state.draggedTask) {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "move";
+      }
+    };
+    this._nativeDrop = (e) => {
+      if (
+        this.state.draggedTask ||
+        (e.dataTransfer && e.dataTransfer.types.includes("application/json"))
+      ) {
+        this.handleDrop(e);
+      }
+    };
+
+    // --- Ctrl+Drag event moving ---
+    this._handleEventMouseDown = (e) => {
+      // Only start drag if Ctrl key is held and clicking on an event
+      if (!e.ctrlKey) return;
+
+      const eventEl = e.target.closest(".rbc-event");
+      if (!eventEl || eventEl.classList.contains("rbc-event-preview")) return;
+
+      // Find which event was clicked by matching title text
+      const eventContent = eventEl.querySelector(".rbc-event-content");
+      if (!eventContent) return;
+      const eventTitle = eventContent.textContent.trim();
+
+      const matchedEvent = (this.props.events || []).find(
+        (ev) => ev.title === eventTitle && !ev.isPreview
+      );
+      if (!matchedEvent) return;
+
+      e.preventDefault();
+      e.stopPropagation();
+
+      const startRect = eventEl.getBoundingClientRect();
+      this._eventDrag = {
+        event: matchedEvent,
+        startX: e.clientX,
+        startY: e.clientY,
+        offsetX: e.clientX - startRect.left,
+        offsetY: e.clientY - startRect.top,
+        ghost: null,
+        moved: false,
+      };
+
+      document.addEventListener("mousemove", this._handleEventMouseMove);
+      document.addEventListener("mouseup", this._handleEventMouseUp);
+    };
+
+    this._handleEventMouseMove = (e) => {
+      if (!this._eventDrag) return;
+      const drag = this._eventDrag;
+
+      // Only start showing ghost after moving a few pixels (prevents accidental drags)
+      const dx = e.clientX - drag.startX;
+      const dy = e.clientY - drag.startY;
+      if (!drag.moved && Math.abs(dx) < 5 && Math.abs(dy) < 5) return;
+      drag.moved = true;
+
+      // Create ghost element on first move
+      if (!drag.ghost) {
+        const ghost = document.createElement("div");
+        ghost.className = "event-drag-ghost";
+        ghost.textContent = drag.event.title;
+        ghost.style.cssText = `
+          position: fixed;
+          z-index: 9999;
+          padding: 4px 10px;
+          background: var(--primary-color, #5e72e4);
+          color: white;
+          border-radius: 6px;
+          font-size: 0.8rem;
+          font-weight: 600;
+          pointer-events: none;
+          opacity: 0.9;
+          box-shadow: 0 4px 16px rgba(0,0,0,0.25);
+          white-space: nowrap;
+          transform: scale(1.04);
+          transition: transform 100ms ease;
+        `;
+        document.body.appendChild(ghost);
+        drag.ghost = ghost;
+        document.body.style.cursor = "grabbing";
+      }
+
+      drag.ghost.style.left = (e.clientX - drag.offsetX) + "px";
+      drag.ghost.style.top = (e.clientY - drag.offsetY) + "px";
+
+      // Update preview position on the calendar
+      if (this.calendarWrapperRef) {
+        const slot = this.calculateDropSlot({
+          clientX: e.clientX,
+          clientY: e.clientY,
+          currentTarget: this.calendarWrapperRef,
+        });
+        const taskDuration = this.props.settings?.defaultTaskDuration || 60;
+        // Preserve original event duration
+        const origDuration = drag.event.end
+          ? new Date(drag.event.end).getTime() - new Date(drag.event.start).getTime()
+          : taskDuration * 60000;
+        const endTime = new Date(slot.start.getTime() + origDuration);
+
+        this.setState({
+          previewEvent: {
+            title: drag.event.title,
+            start: slot.start,
+            end: endTime,
+            isPreview: true,
+            id: "drag-preview",
+          },
+        });
+      }
+    };
+
+    this._handleEventMouseUp = (e) => {
+      const drag = this._eventDrag;
+      if (!drag) return;
+
+      // Clean up listeners
+      document.removeEventListener("mousemove", this._handleEventMouseMove);
+      document.removeEventListener("mouseup", this._handleEventMouseUp);
+      document.body.style.cursor = "";
+
+      // Remove ghost
+      if (drag.ghost) {
+        drag.ghost.remove();
+      }
+
+      // Clear preview
+      this.setState({ previewEvent: null });
+
+      // If we actually moved, calculate drop target and fire onEventDrop
+      if (drag.moved && this.calendarWrapperRef) {
+        const rect = this.calendarWrapperRef.getBoundingClientRect();
+        const isOverCalendar =
+          e.clientX >= rect.left &&
+          e.clientX <= rect.right &&
+          e.clientY >= rect.top &&
+          e.clientY <= rect.bottom;
+
+        if (isOverCalendar) {
+          const slot = this.calculateDropSlot({
+            clientX: e.clientX,
+            clientY: e.clientY,
+            currentTarget: this.calendarWrapperRef,
+          });
+          // Preserve original duration
+          const origDuration = drag.event.end
+            ? new Date(drag.event.end).getTime() - new Date(drag.event.start).getTime()
+            : 60 * 60000;
+          const newEnd = new Date(slot.start.getTime() + origDuration);
+
+          console.log("Ctrl+Drag drop:", drag.event.title, "→", slot.start);
+          if (this.props.onEventDrop) {
+            this.props.onEventDrop({
+              event: drag.event,
+              start: slot.start,
+              end: newEnd,
+            });
+          }
+        }
+      }
+
+      this._eventDrag = null;
+    };
+
+    // Attach after a tick so ref is set
+    setTimeout(() => {
+      if (this.calendarWrapperRef) {
+        this.calendarWrapperRef.addEventListener(
+          "dragover",
+          this._nativeDragOver,
+          true
+        );
+        this.calendarWrapperRef.addEventListener(
+          "drop",
+          this._nativeDrop,
+          true
+        );
+        // Ctrl+Drag: capture mousedown on events
+        this.calendarWrapperRef.addEventListener(
+          "mousedown",
+          this._handleEventMouseDown,
+          true
+        );
+      }
+    }, 0);
   }
 
+  componentDidUpdate(prevProps, prevState) {
+    // Re-attach native listeners if the ref changed (shouldn't normally happen)
+    if (this.calendarWrapperRef && !this._listenersAttached) {
+      this.calendarWrapperRef.addEventListener(
+        "dragover",
+        this._nativeDragOver,
+        true
+      );
+      this.calendarWrapperRef.addEventListener("drop", this._nativeDrop, true);
+      this._listenersAttached = true;
+    }
+  }
+  componentWillUnmount() {
+    if (this.calendarWrapperRef) {
+      this.calendarWrapperRef.removeEventListener(
+        "dragover",
+        this._nativeDragOver,
+        true
+      );
+      this.calendarWrapperRef.removeEventListener(
+        "drop",
+        this._nativeDrop,
+        true
+      );
+      this.calendarWrapperRef.removeEventListener(
+        "mousedown",
+        this._handleEventMouseDown,
+        true
+      );
+    }
+    // Clean up any in-progress event drag
+    if (this._eventDrag) {
+      document.removeEventListener("mousemove", this._handleEventMouseMove);
+      document.removeEventListener("mouseup", this._handleEventMouseUp);
+      if (this._eventDrag.ghost) this._eventDrag.ghost.remove();
+      this._eventDrag = null;
+    }
+    if (this._rafId) {
+      cancelAnimationFrame(this._rafId);
+    }
+  }
   handleDragOver = (e) => {
     e.preventDefault();
     e.dataTransfer.dropEffect = "move";
@@ -21,6 +257,13 @@ class CalendarView extends React.Component {
     // Capture mouse position synchronously (React synthetic events are pooled)
     const clientX = e.clientX;
     const clientY = e.clientY;
+
+    // Always store the last known drag position so we can use it in dragend
+    // (the drop event is unreliable with ReactBigCalendar swallowing events)
+    this._lastDragPosition = { clientX, clientY };
+
+    // Track whether the cursor is currently over the calendar wrapper
+    this._isOverCalendar = true;
 
     // Use requestAnimationFrame for smooth, non-blocking preview updates
     if (this._rafId) {
@@ -83,38 +326,101 @@ class CalendarView extends React.Component {
           opacity: 0.5,
           backgroundColor: this.props.settings?.themeColor || "#007bff",
           border: "2px dashed white",
-          pointerEvents: "none", // Ensure mouse events pass through to drop target
+          pointerEvents: "none",
         },
       };
     }
+
+    // Completed task events get a special visual treatment
+    if (event.completed) {
+      return {
+        className: "rbc-event-completed",
+        style: {
+          opacity: 0.6,
+          textDecoration: "line-through",
+          filter: "grayscale(40%)",
+        },
+      };
+    }
+
     return {};
   };
   handleTaskDragStart = (dragData) => {
     console.log("Task drag started:", dragData);
     this._dropHandled = false;
     this._lastPreviewTime = null;
+    this._lastDragPosition = null;
+    this._isOverCalendar = false;
     this.setState({ draggedTask: dragData });
     // Add global listener to clear drag state if dropped elsewhere (not on calendar)
     document.addEventListener("dragend", this.handleGlobalDragEnd, {
       once: true,
     });
   };
-
-  handleGlobalDragEnd = () => {
-    // If the drop was already handled on the calendar, don't clear state
-    // (the drop handler already cleaned up)
+  handleGlobalDragEnd = (e) => {
+    // If the drop was already handled on the calendar, don't do anything
     if (this._dropHandled) {
       this._dropHandled = false;
       return;
     }
-    // Clear drag state when drag operation ends without a valid drop on calendar
+
+    const draggedTask = this.state.draggedTask;
+
+    // Determine if the drag ended over the calendar.
+    // We can't rely on _isOverCalendar because handleDragLeave often fires
+    // right before dragend when dropping onto a child element.
+    // Instead, check if the last drag position is within the calendar wrapper bounds.
+    let isOverCalendar = false;
+    if (draggedTask && this._lastDragPosition && this.calendarWrapperRef) {
+      const rect = this.calendarWrapperRef.getBoundingClientRect();
+      const { clientX, clientY } = this._lastDragPosition;
+      isOverCalendar =
+        clientX >= rect.left &&
+        clientX <= rect.right &&
+        clientY >= rect.top &&
+        clientY <= rect.bottom;
+    }
+
+    if (draggedTask && isOverCalendar && this._lastDragPosition) {
+      console.log("dragend over calendar — treating as drop (fallback)");
+
+      // Use the last preview position to calculate the drop slot
+      const dropEvent = {
+        clientX: this._lastDragPosition.clientX,
+        clientY: this._lastDragPosition.clientY,
+        currentTarget: this.calendarWrapperRef,
+      };
+
+      const slotInfo = this.calculateDropSlot(dropEvent);
+      console.log("Drop completed (via dragend) — slot:", slotInfo);
+
+      // Clear drag state
+      this.setState({
+        isDraggingOver: false,
+        draggedTask: null,
+        previewEvent: null,
+      });
+      this._lastPreviewTime = null;
+      this._lastDragPosition = null;
+      this._isOverCalendar = false;
+
+      // Pass the drop event and slot info to parent handler
+      if (this.props.onTaskDroppedOnCalendar) {
+        this.props.onTaskDroppedOnCalendar(draggedTask, slotInfo);
+      }
+      return;
+    }
+
+    // Drag ended outside the calendar — clear state
     this.setState({
       isDraggingOver: false,
       draggedTask: null,
       previewEvent: null,
-    });    this._lastPreviewTime = null;
+    });
+    this._lastPreviewTime = null;
+    this._lastDragPosition = null;
+    this._isOverCalendar = false;
   };
-
   handleDragLeave = (e) => {
     // Only clear visual state if we're actually leaving the calendar-wrapper element
     // Use relatedTarget to check if we're moving to a child — if so, don't clear
@@ -123,6 +429,9 @@ class CalendarView extends React.Component {
       // Still inside the wrapper, just moving between children — do nothing
       return;
     }
+
+    // Mark that we've left the calendar area
+    this._isOverCalendar = false;
 
     // Cancel any pending animation frame
     if (this._rafId) {
@@ -134,12 +443,25 @@ class CalendarView extends React.Component {
     this.setState({
       isDraggingOver: false,
       previewEvent: null,
-    });    this._lastPreviewTime = null;
+    });
+    this._lastPreviewTime = null;
   };
 
   handleDrop = (e) => {
     e.preventDefault();
     e.stopPropagation();
+
+    // Prevent duplicate drop handling (drop events can bubble/fire twice)
+    if (this._dropProcessed) {
+      return;
+    }
+    this._dropProcessed = true;
+    // Reset flag after current event loop completes
+    setTimeout(() => {
+      this._dropProcessed = false;
+    }, 0);
+
+    console.log("handleDrop FIRED — processing task drop");
 
     // Mark that drop was handled so handleGlobalDragEnd won't clear state
     this._dropHandled = true;
@@ -156,9 +478,7 @@ class CalendarView extends React.Component {
       clientY: e.clientY,
       currentTarget: this.calendarWrapperRef,
       target: e.target,
-    };
-
-    // Clear drag visual state but keep task data until we process it
+    }; // Clear drag visual state but keep task data until we process it
     const draggedTask = this.state.draggedTask;
 
     this.setState({
@@ -167,6 +487,8 @@ class CalendarView extends React.Component {
       previewEvent: null,
     });
     this._lastPreviewTime = null;
+    this._lastDragPosition = null;
+    this._isOverCalendar = false;
 
     try {
       // Try to get data from dataTransfer first, fall back to stored draggedTask
@@ -200,8 +522,10 @@ class CalendarView extends React.Component {
   };
   calculateDropSlot = (e) => {
     // If e.currentTarget is not available or is not an element, fallback
-    const currentTarget = e.currentTarget || (this.calendarWrapperRef ? this.calendarWrapperRef : null);
-    
+    const currentTarget =
+      e.currentTarget ||
+      (this.calendarWrapperRef ? this.calendarWrapperRef : null);
+
     if (!currentTarget || !currentTarget.querySelector) {
       return { start: new Date(), action: "auto" };
     }
@@ -318,7 +642,8 @@ class CalendarView extends React.Component {
         minutesFromCalendarStart,
         totalMinutes,
         groupCount: timeSlotGroups.length,
-        groupHeight: timeSlotGroups.length > 0 ? timeSlotGroups[0].offsetHeight : 'N/A',
+        groupHeight:
+          timeSlotGroups.length > 0 ? timeSlotGroups[0].offsetHeight : "N/A",
       });
 
       return { start: targetDate, action: "time-slot" };
@@ -465,8 +790,40 @@ class CalendarView extends React.Component {
           {
             className: `calendar-wrapper ${
               this.state.isDraggingOver ? "drag-over" : ""
-            } ${this.state.previewEvent ? "has-preview" : ""}`,
-            ref: (el) => (this.calendarWrapperRef = el),
+            } ${this.state.previewEvent ? "has-preview" : ""}`,            ref: (el) => {
+              if (el && el !== this.calendarWrapperRef) {
+                // Clean up old listeners if ref changes
+                if (this.calendarWrapperRef) {
+                  this.calendarWrapperRef.removeEventListener(
+                    "dragover",
+                    this._nativeDragOver,
+                    true
+                  );
+                  this.calendarWrapperRef.removeEventListener(
+                    "drop",
+                    this._nativeDrop,
+                    true
+                  );
+                  this.calendarWrapperRef.removeEventListener(
+                    "mousedown",
+                    this._handleEventMouseDown,
+                    true
+                  );
+                }
+                this.calendarWrapperRef = el;
+                // Attach capture-phase listeners
+                if (this._nativeDragOver) {
+                  el.addEventListener("dragover", this._nativeDragOver, true);
+                  el.addEventListener("drop", this._nativeDrop, true);
+                  this._listenersAttached = true;
+                }
+                if (this._handleEventMouseDown) {
+                  el.addEventListener("mousedown", this._handleEventMouseDown, true);
+                }
+              } else if (!el) {
+                this.calendarWrapperRef = null;
+              }
+            },
             onDragOver: this.handleDragOver,
             onDragLeave: this.handleDragLeave,
             onDrop: this.handleDrop,

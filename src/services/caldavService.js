@@ -406,14 +406,13 @@ class CalDAVService {
         status: response.status,
         statusText: response.statusText,
       });
-
       if (response.status >= 200 && response.status < 300) {
         console.log("🎉 Event creation confirmed - HTTP", response.status);
       } else {
         console.warn("⚠️ Unexpected response status:", response.status);
       }
 
-      return { success: true };
+      return { success: true, eventId: event.uid };
     } catch (error) {
       console.error("Create event error:", error);
 
@@ -507,6 +506,112 @@ class CalDAVService {
       }
 
       return { success: false, error: errorMessage };
+    }
+  }
+
+  async updateEvent(username, password, calendarUrl, eventId, eventData) {
+    try {
+      console.log("Updating event:", { calendarUrl, eventId, eventData });
+
+      if (!username || !password) {
+        throw new Error("Missing credentials. Please log in again.");
+      }
+      if (!calendarUrl || !eventId) {
+        throw new Error("Missing calendar URL or event ID.");
+      }
+
+      // Step 1: Fetch the existing event to get its full iCalendar data
+      const eventUrl = `${calendarUrl}${eventId}.ics`;
+      console.log("Fetching existing event from:", eventUrl);
+
+      const getResponse = await this.makeRequest(
+        "GET",
+        eventUrl,
+        null,
+        { Accept: "text/calendar" },
+        username,
+        password
+      );
+
+      if (getResponse.status < 200 || getResponse.status >= 300) {
+        throw new Error(
+          `Failed to fetch event: HTTP ${getResponse.status} ${getResponse.statusText}`
+        );
+      }
+
+      // Step 2: Parse the existing iCalendar data
+      let calendarData = getResponse.body;
+      if (!calendarData || !calendarData.includes("BEGIN:VCALENDAR")) {
+        throw new Error("Invalid calendar data received from server");
+      }
+
+      const jcalData = ICAL.parse(calendarData);
+      const comp = new ICAL.Component(jcalData);
+      const vevent = comp.getFirstSubcomponent("vevent");
+
+      if (!vevent) {
+        throw new Error("No VEVENT found in calendar data");
+      }
+
+      const event = new ICAL.Event(vevent);
+
+      // Step 3: Update the event properties
+      if (eventData.start) {
+        event.startDate = ICAL.Time.fromJSDate(
+          new Date(eventData.start),
+          false
+        );
+      }
+      if (eventData.end) {
+        event.endDate = ICAL.Time.fromJSDate(new Date(eventData.end), false);
+      }
+      if (eventData.title !== undefined) {
+        event.summary = eventData.title;
+      }
+      if (eventData.description !== undefined) {
+        event.description = eventData.description;
+      }
+      if (eventData.location !== undefined) {
+        event.location = eventData.location;
+      }
+
+      const updatedCalendarData = comp.toString();
+
+      console.log("=== EVENT UPDATE DEBUG ===");
+      console.log("Event UID:", event.uid);
+      console.log("New Start:", eventData.start);
+      console.log("New End:", eventData.end);
+      console.log("=== END DEBUG ===");
+
+      // Step 4: PUT the updated event back (overwrite existing)
+      const putResponse = await this.makeRequest(
+        "PUT",
+        eventUrl,
+        updatedCalendarData,
+        {
+          "Content-Type": "text/calendar; charset=utf-8",
+        },
+        username,
+        password
+      );
+
+      console.log("✅ PUT response:", {
+        status: putResponse.status,
+        statusText: putResponse.statusText,
+      });
+
+      if (putResponse.status >= 200 && putResponse.status < 300) {
+        console.log("🎉 Event updated successfully - HTTP", putResponse.status);
+        return { success: true };
+      } else {
+        return {
+          success: false,
+          error: `Server returned status ${putResponse.status}: ${putResponse.statusText}`,
+        };
+      }
+    } catch (error) {
+      console.error("Update event error:", error);
+      return { success: false, error: error.message || String(error) };
     }
   }
 
@@ -723,48 +828,28 @@ class CalDAVService {
 
       if (!username || !password) {
         throw new Error("Missing credentials. Please log in again.");
-      }
-
-      // Extract the Nextcloud username from the email (or use as-is if it's already a username)
+      } // Extract the Nextcloud username from the email (or use as-is if it's already a username)
       // Nextcloud CalDAV sharing uses principal URLs, not email addresses
       const shareWithUser = shareWithEmail.includes("@")
         ? shareWithEmail.split("@")[0]
         : shareWithEmail;
 
-      // Extract server URL from the calendar URL
-      const url = new URL(calendarUrl);
-      const serverUrl = `${url.protocol}//${url.host}`;
-
       // Build the principal URL for the user we're sharing with
-      const principalHref = `/remote.php/dav/principals/users/${shareWithUser}/`;
+      const principalHref = `principal:principals/users/${shareWithUser}`;
 
-      // Nextcloud uses the CalDAV sharing protocol (cs:share-resource)
-      // This POSTs an XML body to the calendar URL itself
-      const readAccess = `<d:privilege><d:read /></d:privilege>`;
-      const writeAccess = `<d:privilege><d:read /></d:privilege><d:privilege><d:write /></d:privilege>`;
+      // Nextcloud uses the ownCloud sharing namespace (http://owncloud.org/ns)
+      // NOT the CalendarServer namespace (http://calendarserver.org/ns/)
+      const accessElement =
+        permission === "write" ? `<o:read-write />` : `<o:read />`;
 
-      const shareXml = `<?xml version="1.0" encoding="utf-8" ?>
-<cs:share xmlns:d="DAV:" xmlns:cs="http://calendarserver.org/ns/">
-  <cs:set>
+      const xmlBody = `<?xml version="1.0" encoding="utf-8" ?>
+<o:share xmlns:d="DAV:" xmlns:o="http://owncloud.org/ns">
+  <o:set>
     <d:href>${principalHref}</d:href>
-    <cs:common-name>${shareWithEmail}</cs:common-name>
-    <cs:summary>Shared calendar</cs:summary>
-    <cs:read-write />
-  </cs:set>
-</cs:share>`;
-
-      // For read-only shares, use <cs:read /> instead of <cs:read-write />
-      const shareXmlReadOnly = `<?xml version="1.0" encoding="utf-8" ?>
-<cs:share xmlns:d="DAV:" xmlns:cs="http://calendarserver.org/ns/">
-  <cs:set>
-    <d:href>${principalHref}</d:href>
-    <cs:common-name>${shareWithEmail}</cs:common-name>
-    <cs:summary>Shared calendar</cs:summary>
-    <cs:read />
-  </cs:set>
-</cs:share>`;
-
-      const xmlBody = permission === "write" ? shareXml : shareXmlReadOnly;
+    <o:summary>Shared calendar</o:summary>
+    ${accessElement}
+  </o:set>
+</o:share>`;
 
       const response = await this.makeRequest(
         "POST",
@@ -796,15 +881,17 @@ class CalDAVService {
       } else {
         console.warn("⚠️ Share response status:", response.status);
         let errorMessage = `Server returned status ${response.status}: ${response.statusText}`;
-        
+
         // Try to parse error from XML response
         if (response.body) {
-          const msgMatch = response.body.match(/<s:message>([^<]+)<\/s:message>/);
+          const msgMatch = response.body.match(
+            /<s:message>([^<]+)<\/s:message>/
+          );
           if (msgMatch) {
             errorMessage = msgMatch[1];
           }
         }
-        
+
         return {
           success: false,
           error: errorMessage,
@@ -870,23 +957,20 @@ class CalDAVService {
 
       if (!username || !password) {
         throw new Error("Missing credentials. Please log in again.");
-      }
-
-      // Extract the Nextcloud username from the email
+      } // Extract the Nextcloud username from the email
       const shareWithUser = shareEmail.includes("@")
         ? shareEmail.split("@")[0]
         : shareEmail;
 
-      const url = new URL(calendarUrl);
-      const principalHref = `/remote.php/dav/principals/users/${shareWithUser}/`;
+      const principalHref = `principal:principals/users/${shareWithUser}`;
 
-      // Use the CalDAV sharing protocol to remove (cs:remove)
+      // Use the ownCloud sharing namespace to remove share
       const unshareXml = `<?xml version="1.0" encoding="utf-8" ?>
-<cs:share xmlns:d="DAV:" xmlns:cs="http://calendarserver.org/ns/">
-  <cs:remove>
+<o:share xmlns:d="DAV:" xmlns:o="http://owncloud.org/ns">
+  <o:remove>
     <d:href>${principalHref}</d:href>
-  </cs:remove>
-</cs:share>`;
+  </o:remove>
+</o:share>`;
 
       const response = await this.makeRequest(
         "POST",

@@ -422,7 +422,9 @@ class KalendarApp extends Component {
         allCalendarEvents[calendarUrl] = taggedEvents;
         allEvents.push(...taggedEvents);
       }
-    }    console.log("All calendar events fetched:", allEvents.length);    this.setState((prevState) => {
+    }
+    console.log("All calendar events fetched:", allEvents.length);
+    this.setState((prevState) => {
       // Preserve any local-only or pending-sync events that haven't been confirmed from the server yet
       const preservedEvents = prevState.events.filter(
         (evt) => evt.localOnly || evt.tempId || evt.pendingSync
@@ -654,52 +656,74 @@ class KalendarApp extends Component {
       },
     });
   };
-
   handleEventDrop = async ({ event, start, end }) => {
     console.log("Event dropped:", event.title, "to", start);
 
-    // Update the event in state immediately for smooth UX
+    // Update the event in state immediately for smooth UX (optimistic update)
     const updatedEvents = this.state.events.map((ev) =>
-      ev.id === event.id ? { ...ev, start, end } : ev
+      ev.id === event.id ? { ...ev, start: new Date(start), end: new Date(end) } : ev
     );
     this.setState({ events: updatedEvents });
 
-    // TODO: Send update to server
-    // For now, just show a message
-    setTimeout(() => {
-      alert(
-        "Event moving is not yet fully implemented. Please delete and recreate the event."
-      );
-      // Refresh to get back to server state
+    const calendarUrl = event.calendarUrl || this.state.calendarUrl;
+
+    try {
+      const result = await ipcRenderer.invoke("update-event", {
+        username: this.state.username,
+        password: this.state.password,
+        calendarUrl: calendarUrl,
+        eventId: event.id,
+        eventData: {
+          start: new Date(start).toISOString(),
+          end: new Date(end).toISOString(),
+        },
+      });
+
+      if (result.success) {
+        console.log("✅ Event moved successfully!");
+      } else {
+        console.error("❌ Failed to move event:", result.error);
+        // Revert optimistic update on failure
+        this.fetchAllCalendarEvents();
+      }
+    } catch (error) {
+      console.error("Error moving event:", error);
       this.fetchAllCalendarEvents();
-    }, 500);
+    }
   };
-
   handleEventResize = async ({ event, start, end }) => {
-    console.log(
-      "Event resized:",
-      event.title,
-      "from",
-      event.start,
-      "to",
-      start,
-      end
-    );
+    console.log("Event resized:", event.title, "from", event.start, "to", start, end);
 
-    // Update the event in state immediately for smooth UX
+    // Update the event in state immediately for smooth UX (optimistic update)
     const updatedEvents = this.state.events.map((ev) =>
-      ev.id === event.id ? { ...ev, start, end } : ev
+      ev.id === event.id ? { ...ev, start: new Date(start), end: new Date(end) } : ev
     );
     this.setState({ events: updatedEvents });
 
-    // TODO: Send update to server
-    setTimeout(() => {
-      alert(
-        "Event resizing is not yet fully implemented. Please delete and recreate the event."
-      );
-      // Refresh to get back to server state
+    const calendarUrl = event.calendarUrl || this.state.calendarUrl;
+
+    try {
+      const result = await ipcRenderer.invoke("update-event", {
+        username: this.state.username,
+        password: this.state.password,
+        calendarUrl: calendarUrl,
+        eventId: event.id,
+        eventData: {
+          start: new Date(start).toISOString(),
+          end: new Date(end).toISOString(),
+        },
+      });
+
+      if (result.success) {
+        console.log("✅ Event resized successfully!");
+      } else {
+        console.error("❌ Failed to resize event:", result.error);
+        this.fetchAllCalendarEvents();
+      }
+    } catch (error) {
+      console.error("Error resizing event:", error);
       this.fetchAllCalendarEvents();
-    }, 500);
+    }
   };
 
   handleCloseContextMenu = () => {
@@ -727,14 +751,30 @@ class KalendarApp extends Component {
       showEventModal: true,
     });
   };
-
   handleUpdateEvent = async () => {
-    // TODO: Implement update event API call
-    console.log("Updating event:", this.state.editingEvent);
-    alert(
-      "Event editing is not yet implemented. Please delete and recreate the event."
-    );
-    this.setState({
+    const { editingEvent, newEvent } = this.state;
+    if (!editingEvent) return;
+
+    console.log("Updating event:", editingEvent.id, "with:", newEvent);
+
+    const calendarUrl = editingEvent.calendarUrl || this.state.calendarUrl;
+
+    // Optimistic update — apply changes to UI immediately
+    const updatedStart = new Date(newEvent.start);
+    const updatedEnd = new Date(newEvent.end);
+    this.setState((prevState) => ({
+      events: prevState.events.map((ev) =>
+        ev.id === editingEvent.id
+          ? {
+              ...ev,
+              title: newEvent.title,
+              start: updatedStart,
+              end: updatedEnd,
+              description: newEvent.description,
+              location: newEvent.location,
+            }
+          : ev
+      ),
       showEventModal: false,
       isEditMode: false,
       editingEvent: null,
@@ -745,7 +785,35 @@ class KalendarApp extends Component {
         description: "",
         location: "",
       },
-    });
+    }));
+
+    try {
+      const result = await ipcRenderer.invoke("update-event", {
+        username: this.state.username,
+        password: this.state.password,
+        calendarUrl: calendarUrl,
+        eventId: editingEvent.id,
+        eventData: {
+          title: newEvent.title,
+          start: updatedStart.toISOString(),
+          end: updatedEnd.toISOString(),
+          description: newEvent.description || "",
+          location: newEvent.location || "",
+        },
+      });
+
+      if (result.success) {
+        console.log("✅ Event updated successfully!");
+      } else {
+        console.error("❌ Failed to update event:", result.error);
+        alert("Failed to update event: " + result.error);
+        this.fetchAllCalendarEvents();
+      }
+    } catch (error) {
+      console.error("Error updating event:", error);
+      alert("Error updating event: " + error.message);
+      this.fetchAllCalendarEvents();
+    }
   };
   handleDeleteEvent = async (event) => {
     console.log("Deleting event:", event);
@@ -1094,26 +1162,46 @@ class KalendarApp extends Component {
     // TODO: Sync to CalDAV server using VTODO
     console.log("✓ Task created:", newTask, "in list:", listId);
   };
-
   handleToggleTask = (listId, taskId) => {
-    // Optimistic update
+    // Find the task to determine the new completed state
+    const list = this.state.taskLists.find((l) => l.id === listId);
+    const task = list?.tasks.find((t) => t.id === taskId);
+    if (!task) return;
+
+    const newCompleted = !task.completed;
+
+    // Optimistic update for task list
     this.setState((prevState) => ({
       taskLists: prevState.taskLists.map((list) =>
         list.id === listId
           ? {
               ...list,
-              tasks: list.tasks.map((task) =>
-                task.id === taskId
-                  ? { ...task, completed: !task.completed }
-                  : task
+              tasks: list.tasks.map((t) =>
+                t.id === taskId
+                  ? { ...t, completed: newCompleted }
+                  : t
               ),
             }
           : list
       ),
     }));
 
-    // TODO: Sync to CalDAV server using VTODO
-    console.log("✓ Task toggled:", taskId, "in list:", listId);
+    // Also mark any matching calendar events as completed/uncompleted
+    // Match by title (task name) and description containing the list name
+    const taskName = task.name;
+    this.setState((prevState) => ({
+      events: prevState.events.map((ev) => {
+        const isMatch =
+          ev.title === taskName ||
+          (ev.description && ev.description.includes(`Task from list:`));
+        if (isMatch && ev.title === taskName) {
+          return { ...ev, completed: newCompleted };
+        }
+        return ev;
+      }),
+    }));
+
+    console.log("✓ Task toggled:", taskId, "in list:", listId, "→", newCompleted ? "completed" : "active");
   };
 
   handleDeleteTask = (listId, taskId) => {
@@ -1242,8 +1330,11 @@ class KalendarApp extends Component {
           start: eventData.start.toISOString(),
           end: eventData.end.toISOString(),
         },
-      });      if (result.success) {
+      });
+      if (result.success) {
         console.log("✅ Event created from task successfully!");
+
+        const eventId = result.eventId || tempId;
 
         // Replace the temp event with a permanent one immediately
         // Mark as pendingSync so fetchAllCalendarEvents preserves it until the server catches up
@@ -1252,7 +1343,7 @@ class KalendarApp extends Component {
             evt.tempId === tempId
               ? {
                   ...evt,
-                  id: result.eventId || tempId,
+                  id: eventId,
                   tempId: undefined, // No longer temporary
                   pendingSync: true, // Keep through fetches until server returns it
                 }
@@ -1261,20 +1352,36 @@ class KalendarApp extends Component {
         }));
 
         // Refresh events from server to get the canonical event data
-        // Wait a bit for the server to process, then fetch
-        await new Promise((resolve) => setTimeout(resolve, 3000));
+        // Wait for the server to process the new event before fetching
+        await new Promise((resolve) => setTimeout(resolve, 5000));
 
         // When fetching, merge server events with any remaining local-only events
         try {
           await this.fetchAllCalendarEvents();
-          // After successful fetch, clear pendingSync flags — server data is now authoritative
-          this.setState((prevState) => ({
-            events: prevState.events.map((evt) =>
-              evt.pendingSync ? { ...evt, pendingSync: undefined } : evt
-            ),
-          }));
+          // Only clear pendingSync if the server actually returned the event
+          this.setState((prevState) => {
+            const serverHasEvent = prevState.events.some(
+              (evt) => !evt.pendingSync && evt.id === eventId
+            );
+            if (serverHasEvent) {
+              // Server returned it — remove the pendingSync duplicate
+              return {
+                events: prevState.events.filter(
+                  (evt) => !(evt.pendingSync && evt.id === eventId)
+                ),
+              };
+            }
+            // Server hasn't returned it yet — keep the pendingSync event
+            console.log(
+              "Server hasn't returned the new event yet, keeping local copy"
+            );
+            return {};
+          });
         } catch (fetchErr) {
-          console.warn("Failed to refresh events after task drop, local event preserved:", fetchErr);
+          console.warn(
+            "Failed to refresh events after task drop, local event preserved:",
+            fetchErr
+          );
         }
 
         console.log("✅ Task added to calendar!");
