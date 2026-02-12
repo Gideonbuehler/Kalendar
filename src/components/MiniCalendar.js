@@ -77,10 +77,13 @@ class MiniCalendar extends React.Component {
 
   isSameDay(date1, date2) {
     if (!date1 || !date2) return false;
+    const d1 = date1 instanceof Date ? date1 : new Date(date1);
+    const d2 = date2 instanceof Date ? date2 : new Date(date2);
+    if (isNaN(d1.getTime()) || isNaN(d2.getTime())) return false;
     return (
-      date1.getDate() === date2.getDate() &&
-      date1.getMonth() === date2.getMonth() &&
-      date1.getFullYear() === date2.getFullYear()
+      d1.getDate() === d2.getDate() &&
+      d1.getMonth() === d2.getMonth() &&
+      d1.getFullYear() === d2.getFullYear()
     );
   }
 
@@ -164,7 +167,7 @@ class MiniCalendar extends React.Component {
             {
               key: idx,
               className: classNames.join(" "),
-              onClick: () => dayInfo.isCurrentMonth && this.handleDayClick(dayInfo.day),
+              onClick: () => dayInfo.isCurrentMonth && this.handleDayClick(dayInfo.date),
             },
             dayInfo.day
           );
