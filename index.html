@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self' https://unpkg.com; script-src 'self' 'unsafe-inline' https://unpkg.com; style-src 'self' 'unsafe-inline' https://unpkg.com; font-src 'self' data:;">
+  <title>Kalendar - Nextcloud Calendar</title>
+  <link rel="stylesheet" href="https://unpkg.com/react-big-calendar@0.38.9/lib/css/react-big-calendar.css">
+  <link rel="stylesheet" href="./src/styles/main.css">
+</head>
+<body>
+  <div id="app"></div>
+  
+  <!-- Load dependencies from CDN -->
+  <script crossorigin src="https://unpkg.com/react@17.0.2/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@17.0.2/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/moment@2.29.4/moment.js"></script>
+  <script src="https://unpkg.com/react-big-calendar@0.38.9/dist/react-big-calendar.js"></script>
+  
+  <!-- Load utilities -->
+  <script src="./src/utils/helpers.js"></script>
+  
+  <!-- Load components -->
+  <script src="./src/components/LoginForm.js"></script>
+  <script src="./src/components/MiniCalendar.js"></script>
+  <script src="./src/components/CalendarView.js"></script>
+  <script src="./src/components/EventModal.js"></script>
+  <script src="./src/components/ContextMenu.js"></script>
+  <script src="./src/components/CreateCalendarModal.js"></script>
+  <script src="./src/components/CalendarSettingsModal.js"></script>
+  <script src="./src/components/TaskManager.js"></script>
+  <script src="./src/components/TaskModal.js"></script>
+  <script src="./src/components/Settings.js"></script>
+  
+  <!-- Load main app -->
+  <script src="./src/app.js"></script>
+</body>
+</html>

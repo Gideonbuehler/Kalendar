@@ -1,0 +1,36 @@
+{
+  "name": "kalendar",
+  "productName": "Kalendar",
+  "version": "2.0.0",
+  "description": "A beautiful, highly customizable desktop calendar app for Nextcloud using CalDAV",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder"
+  },
+  "keywords": [
+    "kalendar",
+    "nextcloud",
+    "calendar",
+    "caldav",
+    "electron",
+    "customizable"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "dav": "^1.8.0",
+    "ical.js": "^1.5.0",
+    "moment": "^2.29.4",
+    "react": "^17.0.2",
+    "react-big-calendar": "^0.38.9",
+    "react-dnd": "^16.0.1",
+    "react-dnd-html5-backend": "^16.0.1",
+    "react-dom": "^17.0.2",
+    "webdav": "^5.9.0"
+  },
+  "devDependencies": {
+    "electron": "^27.0.0",
+    "electron-builder": "^24.6.4"
+  }
+}
