@@ -1,9 +1,10 @@
-// Mini Calendar Sidebar Component
+// Mini Calendar Sidebar Component — with tabbed Calendar / Activity views
 class MiniCalendar extends React.Component {
   constructor(props) {
     super(props);
     this.state = {
       displayMonth: new Date(),
+      activeTab: "calendar", // "calendar" | "activity"
     };
   }
 
@@ -37,7 +38,7 @@ class MiniCalendar extends React.Component {
     }
 
     // Next month days
-    const remainingDays = 42 - days.length; // 6 weeks * 7 days
+    const remainingDays = 42 - days.length;
     for (let i = 1; i <= remainingDays; i++) {
       days.push({
         day: i,
@@ -70,7 +71,6 @@ class MiniCalendar extends React.Component {
   hasEvents(date) {
     const { events } = this.props;
     if (!events) return false;
-
     return events.some((event) => {
       const eventStart = new Date(event.start);
       return this.isSameDay(eventStart, date);
@@ -96,39 +96,97 @@ class MiniCalendar extends React.Component {
   };
 
   getCalendarColor(calendarName) {
-    // Generate a consistent color for each calendar
     const colors = [
-      "#5e72e4",
-      "#11cdef",
-      "#2dce89",
-      "#fb6340",
-      "#f5365c",
-      "#ffd600",
-      "#172b4d",
-      "#8965e0",
+      "#5e72e4", "#11cdef", "#2dce89", "#fb6340",
+      "#f5365c", "#ffd600", "#172b4d", "#8965e0",
     ];
     const index = calendarName
       .split("")
       .reduce((acc, char) => acc + char.charCodeAt(0), 0);
     return colors[index % colors.length];
   }
-  render() {
+
+  renderCalendarTab() {
     const { displayMonth } = this.state;
-    const {
-      selectedDate,
-      onLogout,
-      calendars,
-      selectedCalendarIds,
-      onCalendarToggle,
-      onAddCalendar,
-    } = this.props;
+    const { selectedDate } = this.props;
     const days = this.getDaysInMonth(displayMonth);
     const monthName = displayMonth.toLocaleDateString("en-US", {
       month: "long",
       year: "numeric",
     });
 
-    // Filter to get event calendars only
+    return h(
+      "div",
+      { className: "mini-calendar" },
+      h(
+        "div",
+        { className: "mini-calendar-header" },
+        h("span", { className: "mini-calendar-month" }, monthName),
+        h(
+          "div",
+          { className: "mini-calendar-nav" },
+          h("button", { onClick: this.handlePrevMonth, title: "Previous month" }, "‹"),
+          h("button", { onClick: this.handleNextMonth, title: "Next month" }, "›")
+        )
+      ),
+      h(
+        "div",
+        { className: "mini-calendar-grid" },
+        ["S", "M", "T", "W", "T", "F", "S"].map((day, idx) =>
+          h("div", { key: `header-${idx}`, className: "mini-calendar-day-header" }, day)
+        ),
+        days.map((dayInfo, idx) => {
+          const classNames = ["mini-calendar-day"];
+          if (this.isToday(dayInfo.date)) classNames.push("today");
+          if (!dayInfo.isCurrentMonth) classNames.push("other-month");
+          if (this.isSameDay(selectedDate, dayInfo.date)) classNames.push("selected");
+          if (this.hasEvents(dayInfo.date)) classNames.push("has-events");
+
+          return h(
+            "div",
+            {
+              key: idx,
+              className: classNames.join(" "),
+              onClick: () => dayInfo.isCurrentMonth && this.handleDayClick(dayInfo.day),
+            },
+            dayInfo.day
+          );
+        })
+      ),
+      // Day Timeline below the mini calendar
+      h(DayTimeline, {
+        events: this.props.events,
+        selectedDate: selectedDate,
+        onDateSelect: this.props.onDateSelect,
+      })
+    );
+  }
+
+  renderActivityTab() {
+    return h(
+      "div",
+      { className: "sidebar-tab-content" },
+      h(ProductivityHeatmap, {
+        events: this.props.events,
+        taskLists: this.props.taskLists,
+      }),
+      h(EventInsights, {
+        events: this.props.events,
+        taskLists: this.props.taskLists,
+      })
+    );
+  }
+
+  render() {
+    const { activeTab } = this.state;
+    const {
+      onLogout,
+      calendars,
+      selectedCalendarIds,
+      onCalendarToggle,
+      onAddCalendar,
+    } = this.props;
+
     const eventCalendars = calendars
       ? calendars.filter(
           (cal) => cal.components && cal.components.includes("VEVENT")
@@ -151,69 +209,40 @@ class MiniCalendar extends React.Component {
         )
       ),
 
-      // Mini Calendar
+      // Tabbed Navigation
       h(
         "div",
-        { className: "mini-calendar" },
+        { className: "sidebar-tabs" },
         h(
-          "div",
-          { className: "mini-calendar-header" },
-          h("span", { className: "mini-calendar-month" }, monthName),
-          h(
-            "div",
-            { className: "mini-calendar-nav" },
-            h(
-              "button",
-              {
-                onClick: this.handlePrevMonth,
-                title: "Previous month",
-              },
-              "‹"
-            ),
-            h(
-              "button",
-              {
-                onClick: this.handleNextMonth,
-                title: "Next month",
-              },
-              "›"
-            )
-          )
+          "button",
+          {
+            className: `sidebar-tab ${activeTab === "calendar" ? "active" : ""}`,
+            onClick: () => this.setState({ activeTab: "calendar" }),
+          },
+          h("span", { className: "sidebar-tab-icon" }, "📅"),
+          "Calendar"
         ),
-
         h(
-          "div",
-          { className: "mini-calendar-grid" },
-          ["S", "M", "T", "W", "T", "F", "S"].map((day, idx) =>
-            h(
-              "div",
-              { key: `header-${idx}`, className: "mini-calendar-day-header" },
-              day
-            )
-          ),
-          days.map((dayInfo, idx) => {
-            const classNames = ["mini-calendar-day"];
-            if (this.isToday(dayInfo.date)) classNames.push("today");
-            if (!dayInfo.isCurrentMonth) classNames.push("other-month");
-            if (this.isSameDay(selectedDate, dayInfo.date))
-              classNames.push("selected");
-            if (this.hasEvents(dayInfo.date)) classNames.push("has-events");
-
-            return h(
-              "div",
-              {
-                key: idx,
-                className: classNames.join(" "),
-                onClick: () =>
-                  dayInfo.isCurrentMonth && this.handleDayClick(dayInfo.day),
-              },
-              dayInfo.day
-            );
-          })
+          "button",
+          {
+            className: `sidebar-tab ${activeTab === "activity" ? "active" : ""}`,
+            onClick: () => this.setState({ activeTab: "activity" }),
+          },
+          h("span", { className: "sidebar-tab-icon" }, "📊"),
+          "Activity"
         )
       ),
 
-      // Calendar List Section
+      // Tab Content (scrollable area)
+      h(
+        "div",
+        { className: "sidebar-tab-panel" },
+        activeTab === "calendar"
+          ? this.renderCalendarTab()
+          : this.renderActivityTab()
+      ),
+
+      // Calendar List Section (always visible below tabs)
       h(
         "div",
         { className: "sidebar-calendars" },
@@ -237,15 +266,12 @@ class MiniCalendar extends React.Component {
           eventCalendars.length > 0
             ? eventCalendars.map((cal) => {
                 const isActive = selectedCalendarIds.includes(cal.url);
-                const color =
-                  cal.color || this.getCalendarColor(cal.displayName);
+                const color = cal.color || this.getCalendarColor(cal.displayName);
                 return h(
                   "div",
                   {
                     key: cal.url,
-                    className: `sidebar-calendar-item ${
-                      isActive ? "active" : ""
-                    }`,
+                    className: `sidebar-calendar-item ${isActive ? "active" : ""}`,
                   },
                   h("input", {
                     type: "checkbox",
@@ -259,10 +285,7 @@ class MiniCalendar extends React.Component {
                   }),
                   h(
                     "span",
-                    {
-                      className: "sidebar-calendar-name",
-                      title: cal.displayName,
-                    },
+                    { className: "sidebar-calendar-name", title: cal.displayName },
                     cal.displayName || "Unknown"
                   ),
                   h(

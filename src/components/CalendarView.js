@@ -12,7 +12,8 @@ class CalendarView extends React.Component {
     };
     this._rafId = null; // For requestAnimationFrame-based drag over updates    this._lastPreviewTime = null; // Track last preview start time to avoid redundant setState
     this._dropHandled = false; // Flag to prevent handleGlobalDragEnd from clearing after a successful drop
-  }  componentDidMount() {
+  }
+  componentDidMount() {
     // Use native event listeners in CAPTURE phase so that drop events
     // are intercepted before ReactBigCalendar's internal elements can
     // swallow them. React's synthetic onDrop uses bubbling, which doesn't
@@ -105,8 +106,8 @@ class CalendarView extends React.Component {
         document.body.style.cursor = "grabbing";
       }
 
-      drag.ghost.style.left = (e.clientX - drag.offsetX) + "px";
-      drag.ghost.style.top = (e.clientY - drag.offsetY) + "px";
+      drag.ghost.style.left = e.clientX - drag.offsetX + "px";
+      drag.ghost.style.top = e.clientY - drag.offsetY + "px";
 
       // Update preview position on the calendar
       if (this.calendarWrapperRef) {
@@ -118,7 +119,8 @@ class CalendarView extends React.Component {
         const taskDuration = this.props.settings?.defaultTaskDuration || 60;
         // Preserve original event duration
         const origDuration = drag.event.end
-          ? new Date(drag.event.end).getTime() - new Date(drag.event.start).getTime()
+          ? new Date(drag.event.end).getTime() -
+            new Date(drag.event.start).getTime()
           : taskDuration * 60000;
         const endTime = new Date(slot.start.getTime() + origDuration);
 
@@ -168,7 +170,8 @@ class CalendarView extends React.Component {
           });
           // Preserve original duration
           const origDuration = drag.event.end
-            ? new Date(drag.event.end).getTime() - new Date(drag.event.start).getTime()
+            ? new Date(drag.event.end).getTime() -
+              new Date(drag.event.start).getTime()
             : 60 * 60000;
           const newEnd = new Date(slot.start.getTime() + origDuration);
 
@@ -316,7 +319,6 @@ class CalendarView extends React.Component {
       }
     });
   };
-
   // Helper to customize day/time slot rendering to show preview
   eventPropGetter = (event, start, end, isSelected) => {
     if (event.isPreview) {
@@ -343,7 +345,42 @@ class CalendarView extends React.Component {
       };
     }
 
-    return {};
+    // Time-of-day gradient coloring — morning=warm, afternoon=neutral, evening=cool
+    const eventStart = new Date(event.start);
+    const hour = eventStart.getHours();
+    let timeClass = "";
+    let timeBg = null;
+
+    if (hour >= 5 && hour < 9) {
+      // Early morning — sunrise warm orange
+      timeClass = "rbc-event-morning-early";
+      timeBg = "linear-gradient(135deg, #f6d365 0%, #fda085 100%)";
+    } else if (hour >= 9 && hour < 12) {
+      // Morning — energetic warm
+      timeClass = "rbc-event-morning";
+      timeBg = "linear-gradient(135deg, #fa709a 0%, #fee140 100%)";
+    } else if (hour >= 12 && hour < 14) {
+      // Midday — vibrant
+      timeClass = "rbc-event-midday";
+      timeBg = "linear-gradient(135deg, #a18cd1 0%, #fbc2eb 100%)";
+    } else if (hour >= 14 && hour < 17) {
+      // Afternoon — balanced
+      timeClass = "rbc-event-afternoon";
+      timeBg = "linear-gradient(135deg, #667eea 0%, #764ba2 100%)";
+    } else if (hour >= 17 && hour < 20) {
+      // Evening — sunset cool
+      timeClass = "rbc-event-evening";
+      timeBg = "linear-gradient(135deg, #f093fb 0%, #f5576c 100%)";
+    } else {
+      // Night — deep cool
+      timeClass = "rbc-event-night";
+      timeBg = "linear-gradient(135deg, #4facfe 0%, #00f2fe 100%)";
+    }
+
+    return {
+      className: timeClass,
+      style: timeBg ? { background: timeBg, border: "none", color: "white" } : {},
+    };
   };
   handleTaskDragStart = (dragData) => {
     console.log("Task drag started:", dragData);
@@ -743,21 +780,21 @@ class CalendarView extends React.Component {
         // Header
         h(
           "div",
-          { className: "app-header" },
-          h(
+          { className: "app-header" },          h(
             "div",
             { className: "header-left" },
             h(
               "h1",
               { className: "app-title-header" },
-              h("span", { className: "logo-icon" }, "."),
+              h("span", { className: "logo-icon" }),
               "Kalendar"
-            )
+            ),
+            // Next Event Countdown
+            h(NextEventCountdown, { events: events })
           ),
           h(
             "div",
-            { className: "header-controls" },
-            // Action Buttons
+            { className: "header-controls" },            // Action Buttons
             h(
               "div",
               { className: "action-buttons" },
@@ -790,7 +827,8 @@ class CalendarView extends React.Component {
           {
             className: `calendar-wrapper ${
               this.state.isDraggingOver ? "drag-over" : ""
-            } ${this.state.previewEvent ? "has-preview" : ""}`,            ref: (el) => {
+            } ${this.state.previewEvent ? "has-preview" : ""}`,
+            ref: (el) => {
               if (el && el !== this.calendarWrapperRef) {
                 // Clean up old listeners if ref changes
                 if (this.calendarWrapperRef) {
@@ -818,7 +856,11 @@ class CalendarView extends React.Component {
                   this._listenersAttached = true;
                 }
                 if (this._handleEventMouseDown) {
-                  el.addEventListener("mousedown", this._handleEventMouseDown, true);
+                  el.addEventListener(
+                    "mousedown",
+                    this._handleEventMouseDown,
+                    true
+                  );
                 }
               } else if (!el) {
                 this.calendarWrapperRef = null;
@@ -830,8 +872,7 @@ class CalendarView extends React.Component {
           },
           h(
             "div",
-            { className: "calendar-container" },
-            h(CalendarComponent, {
+            { className: "calendar-container" },            h(CalendarComponent, {
               localizer: localizer,
               events: displayEvents,
               startAccessor: "start",
@@ -844,7 +885,8 @@ class CalendarView extends React.Component {
               onSelectSlot: onSelectSlot,
               onSelectEvent: onSelectEvent,
               // Note: Drag and drop requires npm install
-              defaultView: settings.defaultView || "month",
+              view: this.props.currentView || settings.defaultView || "month",
+              onView: this.props.onViewChange || (() => {}),
               views: ["month", "week", "day", "agenda"],
               step: 15, // 15 minute increments
               timeslots: 4, // 4 slots per hour (15 min each)
@@ -862,9 +904,9 @@ class CalendarView extends React.Component {
               "div",
               null,
               h("kbd", null, "Alt"),
-              " + Click to delete • ",
+              "+Click delete • ",
               h("kbd", null, "Ctrl"),
-              " + Drag to move"
+              "+Drag move"
             )
           )
         )
