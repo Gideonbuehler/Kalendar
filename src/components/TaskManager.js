@@ -25,7 +25,8 @@ class TaskManager extends React.Component {
     const { newListName } = this.state;
     if (newListName.trim()) {
       if (this.props.onCreateList) this.props.onCreateList(newListName.trim());
-      if (this.props.onAddTaskList) this.props.onAddTaskList(newListName.trim());
+      if (this.props.onAddTaskList)
+        this.props.onAddTaskList(newListName.trim());
       this.setState({ newListName: "", showNewListForm: false });
     }
   };
@@ -33,7 +34,8 @@ class TaskManager extends React.Component {
   handleCreateTask = (listId) => {
     const { newTaskName } = this.state;
     if (newTaskName.trim()) {
-      if (this.props.onCreateTask) this.props.onCreateTask(listId, newTaskName.trim());
+      if (this.props.onCreateTask)
+        this.props.onCreateTask(listId, newTaskName.trim());
       this.setState({
         newTaskName: "",
         showNewTaskForm: { ...this.state.showNewTaskForm, [listId]: false },
@@ -172,17 +174,15 @@ class TaskManager extends React.Component {
                     { className: "expand-icon" },
                     expandedLists[list.id] ? "▾" : "▸"
                   ),
-                  h(
-                    "span",
-                    { className: "list-name-compact" },
-                    list.name
-                  ),
+                  h("span", { className: "list-name-compact" }, list.name),
                   h(
                     "span",
                     { className: "task-count-compact" },
-                    `${list.tasks ? list.tasks.filter((t) => t.completed).length : 0}/${
-                      list.tasks ? list.tasks.length : 0
-                    }`
+                    `${
+                      list.tasks
+                        ? list.tasks.filter((t) => t.completed).length
+                        : 0
+                    }/${list.tasks ? list.tasks.length : 0}`
                   ),
                   h(
                     "button",
@@ -221,8 +221,7 @@ class TaskManager extends React.Component {
                         onChange: (e) =>
                           this.setState({ newTaskName: e.target.value }),
                         onKeyPress: (e) => {
-                          if (e.key === "Enter")
-                            this.handleCreateTask(list.id);
+                          if (e.key === "Enter") this.handleCreateTask(list.id);
                         },
                         autoFocus: true,
                         className: "inline-input",
@@ -285,7 +284,8 @@ class TaskManager extends React.Component {
                               checked: task.completed || false,
                               onChange: (e) => {
                                 e.stopPropagation();
-                                if (onToggleTask) onToggleTask(list.id, task.id);
+                                if (onToggleTask)
+                                  onToggleTask(list.id, task.id);
                               },
                             }),
                             h(
@@ -300,7 +300,10 @@ class TaskManager extends React.Component {
                                 onClick: (e) => {
                                   e.stopPropagation();
                                   if (this.props.onTaskToCalendar) {
-                                    this.props.onTaskToCalendar(list.id, task.id);
+                                    this.props.onTaskToCalendar(
+                                      list.id,
+                                      task.id
+                                    );
                                   }
                                 },
                                 title: "Add to calendar",

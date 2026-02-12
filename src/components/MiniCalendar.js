@@ -237,12 +237,15 @@ class MiniCalendar extends React.Component {
           eventCalendars.length > 0
             ? eventCalendars.map((cal) => {
                 const isActive = selectedCalendarIds.includes(cal.url);
-                const color = cal.color || this.getCalendarColor(cal.displayName);
+                const color =
+                  cal.color || this.getCalendarColor(cal.displayName);
                 return h(
                   "div",
                   {
                     key: cal.url,
-                    className: `sidebar-calendar-item ${isActive ? "active" : ""}`,
+                    className: `sidebar-calendar-item ${
+                      isActive ? "active" : ""
+                    }`,
                   },
                   h("input", {
                     type: "checkbox",
@@ -278,11 +281,7 @@ class MiniCalendar extends React.Component {
                   )
                 );
               })
-            : h(
-                "div",
-                { className: "no-calendars-msg" },
-                "No calendars found"
-              )
+            : h("div", { className: "no-calendars-msg" }, "No calendars found")
         )
       ),
 

@@ -95,6 +95,7 @@
   margin: 0;
   padding: 0;
   box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
 }
 
 body {
@@ -125,6 +126,7 @@ body {
 ::-webkit-scrollbar-thumb {
   background: var(--text-tertiary);
   border-radius: 3px;
+  transition: background 200ms ease;
 }
 
 ::-webkit-scrollbar-thumb:hover {
@@ -138,6 +140,59 @@ body {
   background: var(--background);
 }
 
+.app-container::before {
+  content: '';
+  position: fixed;
+  top: -50%;
+  left: -50%;
+  width: 200%;
+  height: 200%;
+  background: radial-gradient(
+    ellipse at 20% 50%,
+    rgba(94, 114, 228, 0.03) 0%,
+    transparent 50%
+  ), radial-gradient(
+    ellipse at 80% 20%,
+    rgba(17, 205, 239, 0.02) 0%,
+    transparent 50%
+  ), radial-gradient(
+    ellipse at 60% 80%,
+    rgba(45, 206, 137, 0.02) 0%,
+    transparent 50%
+  );
+  animation: ambientMove 20s ease-in-out infinite alternate;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.app-container > * {
+  position: relative;
+  z-index: 1;
+}
+
+@keyframes ambientMove {
+  0% { transform: translate(0, 0) rotate(0deg); }
+  33% { transform: translate(2%, -1%) rotate(0.5deg); }
+  66% { transform: translate(-1%, 2%) rotate(-0.5deg); }
+  100% { transform: translate(1%, -1%) rotate(0.3deg); }
+}
+
+[data-theme="dark"] .app-container::before {
+  background: radial-gradient(
+    ellipse at 20% 50%,
+    rgba(120, 137, 232, 0.04) 0%,
+    transparent 50%
+  ), radial-gradient(
+    ellipse at 80% 20%,
+    rgba(45, 206, 234, 0.03) 0%,
+    transparent 50%
+  ), radial-gradient(
+    ellipse at 60% 80%,
+    rgba(45, 206, 137, 0.02) 0%,
+    transparent 50%
+  );
+}
+
 /* Mini Calendar Sidebar */
 .sidebar {
   width: 280px;
@@ -146,6 +201,18 @@ body {
   display: flex;
   flex-direction: column;
   overflow-y: auto;
+  animation: sidebarSlideIn 500ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes sidebarSlideIn {
+  from {
+    opacity: 0;
+    transform: translateX(-24px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
 }
 
 .sidebar-header {
@@ -228,18 +295,25 @@ body {
   color: var(--text-primary);
   border-radius: var(--radius-sm);
   cursor: pointer;
-  transition: all var(--transition-fast);
+  transition: all 180ms cubic-bezier(0.34, 1.56, 0.64, 1);
   position: relative;
 }
 
 .mini-calendar-day:hover {
-  background: var(--hover-bg);
+  transform: scale(1.15);
+  background: var(--selection-bg);
 }
 
 .mini-calendar-day.today {
   background: var(--primary-color);
   color: white;
   font-weight: 700;
+  animation: todayGlow 2.5s ease-in-out infinite;
+}
+
+@keyframes todayGlow {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(94, 114, 228, 0.3); }
+  50% { box-shadow: 0 0 0 4px rgba(94, 114, 228, 0.1); }
 }
 
 .mini-calendar-day.selected {
@@ -261,6 +335,11 @@ body {
   height: 4px;
   background: var(--accent-color);
   border-radius: 50%;
+  transition: all 200ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.mini-calendar-day.has-events:hover::after {
+  transform: translateX(-50%) scale(1.8);
 }
 
 /* Main Content Area */
@@ -269,6 +348,18 @@ body {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  animation: mainContentAppear 600ms cubic-bezier(0.16, 1, 0.3, 1) 100ms both;
+}
+
+@keyframes mainContentAppear {
+  from {
+    opacity: 0;
+    transform: translateX(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
 }
 
 /* App Header */
@@ -315,12 +406,19 @@ body {
   border-radius: var(--radius-md);
   font-size: var(--font-lg);
   cursor: pointer;
-  transition: all var(--transition-fast);
+  transition: all var(--transition-fast), transform 200ms cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
 .btn-icon:hover {
-  background: var(--hover-bg);
-  color: var(--text-primary);
+  transform: scale(1.12);
+}
+
+.btn-icon:active {
+  transform: scale(0.92);
+}
+
+.btn-icon:active:not(:disabled) {
+  animation: none;
 }
 
 /* Calendar Wrapper */
@@ -330,11 +428,25 @@ body {
   padding: var(--spacing-lg);
 }
 
+.calendar-wrapper.drag-over {
+  animation: dragOverPulse 1.5s ease-in-out infinite;
+}
+
+@keyframes dragOverPulse {
+  0%, 100% {
+    box-shadow: inset 0 0 0 2px rgba(94, 114, 228, 0.15);
+  }
+  50% {
+    box-shadow: inset 0 0 0 3px rgba(94, 114, 228, 0.3);
+  }
+}
+
 .calendar-container {
   height: 100%;
   background: var(--surface);
   border-radius: var(--radius-lg);
   padding: var(--spacing-md);
+  transition: opacity 200ms ease;
 }
 
 /* React Big Calendar - Minimalist Styling */
@@ -372,6 +484,8 @@ body {
   background: var(--primary-color);
   color: white;
   border-color: var(--primary-color);
+  transition: all 200ms cubic-bezier(0.34, 1.56, 0.64, 1);
+  box-shadow: 0 2px 8px rgba(94, 114, 228, 0.3);
 }
 
 .rbc-toolbar-label {
@@ -396,22 +510,36 @@ body {
 .rbc-month-view {
   border: none;
   background: var(--surface);
+  animation: viewTransition 350ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes viewTransition {
+  from {
+    opacity: 0;
+    transform: scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
 }
 
 .rbc-month-row {
   border: none;
   background: var(--surface);
+  transition: background 200ms ease;
 }
 
 .rbc-day-bg {
   border-left: 1px solid var(--border-subtle);
   border-top: 1px solid var(--border-subtle);
   background: var(--surface);
-  transition: background var(--transition-fast);
+  transition: background 200ms ease, box-shadow 200ms ease;
 }
 
 .rbc-day-bg:hover {
   background: var(--hover-bg);
+  box-shadow: inset 0 0 0 1px rgba(94, 114, 228, 0.15);
 }
 
 .rbc-off-range-bg {
@@ -428,6 +556,11 @@ body {
   text-align: right;
   font-size: var(--font-sm);
   color: var(--text-primary);
+  transition: color 200ms ease, font-weight 200ms ease;
+}
+
+.rbc-date-cell:hover {
+  color: var(--primary-color);
 }
 
 .rbc-off-range {
@@ -443,6 +576,7 @@ body {
 .rbc-time-view {
   border: none;
   background: var(--surface);
+  animation: viewTransition 350ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
 .rbc-time-header {
@@ -489,6 +623,26 @@ body {
 .rbc-current-time-indicator {
   background-color: var(--accent-color);
   height: 2px;
+  position: relative;
+  box-shadow: 0 0 8px 1px var(--accent-color);
+  animation: timeIndicatorPulse 2s ease-in-out infinite;
+}
+
+.rbc-current-time-indicator::before {
+  content: '';
+  position: absolute;
+  left: -4px;
+  top: -3px;
+  width: 8px;
+  height: 8px;
+  background: var(--accent-color);
+  border-radius: 50%;
+  box-shadow: 0 0 6px var(--accent-color);
+}
+
+@keyframes timeIndicatorPulse {
+  0%, 100% { opacity: 0.8; }
+  50% { opacity: 1; }
 }
 
 /* Selection - Rounded with 15min Increments */
@@ -497,6 +651,18 @@ body {
   border: 2px solid var(--primary-color);
   border-radius: var(--radius-lg);
   z-index: 10;
+  animation: slotSelectionGrow 200ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes slotSelectionGrow {
+  from {
+    opacity: 0;
+    transform: scaleY(0.5);
+  }
+  to {
+    opacity: 1;
+    transform: scaleY(1);
+  }
 }
 
 .rbc-slot-selecting {
@@ -512,25 +678,70 @@ body {
   padding: 2px 6px;
   font-size: var(--font-xs);
   font-weight: 500;
-  transition: all var(--transition-fast);
+  transition: all 200ms cubic-bezier(0.4, 0, 0.2, 1);
+  will-change: transform, box-shadow;
+  animation: eventAppear 300ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes eventAppear {
+  from {
+    opacity: 0;
+    transform: scaleY(0.8) translateY(-2px);
+  }
+  to {
+    opacity: 1;
+    transform: scaleY(1) translateY(0);
+  }
 }
 
 .rbc-event:hover {
-  background-color: var(--accent-color);
-  transform: scale(1.02);
+  transform: scale(1.03) translateY(-1px);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+  z-index: 100 !important;
 }
 
-.rbc-event-label {
-  font-size: var(--font-xs);
+[data-theme="dark"] .rbc-event:hover {
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
 }
 
-.rbc-event-content {
-  font-weight: 500;
+/* Completed Event Style */
+.rbc-event.rbc-event-completed {
+  position: relative;
+  background: linear-gradient(135deg, #6c757d, #868e96) !important;
+}
+
+.rbc-event.rbc-event-completed .rbc-event-content {
+  text-decoration: line-through;
+  opacity: 0.8;
+}
+
+.rbc-event.rbc-event-completed::after {
+  content: '✓';
+  position: absolute;
+  top: 50%;
+  right: 6px;
+  transform: translateY(-50%);
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.7);
+  animation: checkAppear 400ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+@keyframes checkAppear {
+  from {
+    opacity: 0;
+    transform: translateY(-50%) scale(0) rotate(-90deg);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(-50%) scale(1) rotate(0deg);
+  }
 }
 
 /* Agenda View */
 .rbc-agenda-view {
   border: none;
+  animation: viewTransition 350ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
 .rbc-agenda-view table {
@@ -574,6 +785,8 @@ select:focus {
   outline: none;
   border-color: var(--primary-color);
   background: var(--surface);
+  box-shadow: 0 0 0 3px rgba(94, 114, 228, 0.15);
+  transition: all 200ms ease, box-shadow 300ms ease;
 }
 
 input:disabled,
@@ -593,16 +806,31 @@ button {
   border-radius: var(--radius-md);
   cursor: pointer;
   transition: all var(--transition-fast);
+  position: relative;
+  overflow: hidden;
+  transform: translate3d(0, 0, 0); /* hardware acceleration */
+}
+
+button:active:not(:disabled) {
+  transform: scale(0.97);
+  transition: transform 80ms ease;
 }
 
 .btn-primary {
   background: linear-gradient(135deg, var(--primary-color), var(--accent-color));
-  color: white;
+  background-size: 200% 200%;
+  transition: all var(--transition-base), background-position 400ms ease;
 }
 
 .btn-primary:hover:not(:disabled) {
-  transform: translateY(-1px);
-  box-shadow: 0 4px 12px var(--shadow);
+  background-position: 100% 0;
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(94, 114, 228, 0.35);
+}
+
+.btn-primary:active:not(:disabled) {
+  transform: translateY(0) scale(0.98);
+  box-shadow: 0 2px 8px rgba(94, 114, 228, 0.2);
 }
 
 .btn-secondary {
@@ -613,6 +841,10 @@ button {
 
 .btn-secondary:hover:not(:disabled) {
   background: var(--hover-bg);
+}
+
+.btn-secondary:active:not(:disabled) {
+  transform: scale(0.97);
 }
 
 .btn-large {
@@ -631,8 +863,16 @@ button:disabled {
   align-items: center;
   justify-content: center;
   min-height: 100vh;
-  background: linear-gradient(135deg, var(--primary-color) 0%, var(--accent-color) 100%);
+  background: linear-gradient(-45deg, #5e72e4, #11cdef, #2dce89, #7889e8);
+  background-size: 400% 400%;
+  animation: gradientShift 12s ease infinite;
   padding: var(--spacing-lg);
+}
+
+@keyframes gradientShift {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
 }
 
 .login-form {
@@ -642,6 +882,20 @@ button:disabled {
   box-shadow: 0 20px 60px var(--shadow-lg);
   width: 100%;
   max-width: 420px;
+  animation: loginAppear 600ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes loginAppear {
+  from {
+    opacity: 0;
+    transform: translateY(30px) scale(0.96);
+    filter: blur(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    filter: blur(0);
+  }
 }
 
 .app-logo {
@@ -662,6 +916,13 @@ button:disabled {
 
 .logo-icon {
   font-size: var(--font-3xl);
+  display: inline-block;
+  animation: logoPulse 3s ease-in-out infinite;
+}
+
+@keyframes logoPulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.08); }
 }
 
 .app-subtitle {
@@ -671,6 +932,25 @@ button:disabled {
 
 .form-group {
   margin-bottom: var(--spacing-lg);
+  animation: formGroupAppear 400ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.form-group:nth-child(1) { animation-delay: 50ms; }
+.form-group:nth-child(2) { animation-delay: 100ms; }
+.form-group:nth-child(3) { animation-delay: 150ms; }
+.form-group:nth-child(4) { animation-delay: 200ms; }
+.form-group:nth-child(5) { animation-delay: 250ms; }
+.form-group:nth-child(6) { animation-delay: 300ms; }
+
+@keyframes formGroupAppear {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .form-row {
@@ -705,6 +985,15 @@ label {
   gap: var(--spacing-sm);
   color: var(--error);
   font-size: var(--font-sm);
+  animation: errorShake 500ms cubic-bezier(0.36, 0.07, 0.19, 0.97) both;
+}
+
+@keyframes errorShake {
+  0%, 100% { transform: translateX(0); }
+  10%, 50%, 70%, 90% { transform: translateX(-3px); }
+  20%, 40%, 60%, 80% { transform: translateX(3px); }
+  30% { transform: translateX(-5px); }
+  60% { transform: translateX(5px); }
 }
 
 .error-icon {
@@ -748,6 +1037,18 @@ label {
   justify-content: center;
   z-index: 1000;
   padding: var(--spacing-lg);
+  animation: overlayFadeIn 200ms ease both;
+}
+
+@keyframes overlayFadeIn {
+  from {
+    opacity: 0;
+    backdrop-filter: blur(0);
+  }
+  to {
+    opacity: 1;
+    backdrop-filter: blur(8px);
+  }
 }
 
 .modal {
@@ -760,6 +1061,18 @@ label {
   max-height: 90vh;
   display: flex;
   flex-direction: column;
+  animation: modalSlideUp 350ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes modalSlideUp {
+  from {
+    opacity: 0;
+    transform: translateY(24px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
 }
 
 .modal-header {
@@ -885,12 +1198,13 @@ label {
   left: 4px;
   bottom: 4px;
   background-color: white;
-  transition: var(--transition-fast);
+  transition: transform 300ms cubic-bezier(0.34, 1.56, 0.64, 1), background-color var(--transition-fast);
   border-radius: 50%;
 }
 
 .toggle-switch input:checked + .toggle-slider {
   background-color: var(--primary-color);
+  transition: background-color 250ms ease;
 }
 
 .toggle-switch input:checked + .toggle-slider:before {
@@ -1146,6 +1460,10 @@ label {
   filter: brightness(1.1);
 }
 
+[data-theme="dark"] .hoverable-event:hover {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4) !important;
+}
+
 /* Make draggable events have a cursor indicator */
 .rbc-event.rbc-addons-dnd-draggable {
   cursor: grab;
@@ -1218,20 +1536,25 @@ label {
   color: var(--text-secondary);
   box-shadow: 0 4px 12px var(--shadow);
   z-index: 100;
-  animation: pulseHint 3s ease-in-out infinite;
+  animation: pulseHint 3s ease-in-out infinite, hintFloat 4s ease-in-out infinite;
+}
+
+@keyframes hintFloat {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-3px); }
 }
 
 .keyboard-hint kbd {
   display: inline-block;
   padding: 2px 6px;
-  background: var(--surface-alt);
-  border: 1px solid var (--border-color);
+  background: var(--surface);
+  border: 1px solid var(--border-color);
   border-radius: var(--radius-sm);
-  font-family: monospace;
   font-size: var(--font-xs);
+  font-family: monospace;
   font-weight: 600;
-  color: var(--primary-color);
-  margin: 0 2px;
+  color: var(--text-primary);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
 }
 
 /* Calendar Toggles (Header) */
@@ -1294,6 +1617,7 @@ label {
 .sidebar-calendars::-webkit-scrollbar-thumb {
   background: var(--border-color);
   border-radius: 2px;
+  transition: background 200ms ease;
 }
 
 .sidebar-calendars::-webkit-scrollbar-thumb:hover {
@@ -1481,13 +1805,13 @@ label {
   height: 40px;
   border-radius: var(--radius-md);
   border: 3px solid transparent;
-  transition: all var(--transition-fast);
+  transition: all 200ms cubic-bezier(0.34, 1.56, 0.64, 1);
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 }
 
 .color-option:hover {
-  transform: scale(1.1);
-  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+  transform: scale(1.15) translateY(-2px);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.2);
 }
 
 .color-option.selected {
@@ -1601,4 +1925,34 @@ label {
   font-weight: 600;
   color: var(--text-primary);
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+}
+
+/* --- Ctrl+Drag Event Ghost --- */
+.event-drag-ghost {
+  animation: ghostAppear 150ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes ghostAppear {
+  from {
+    opacity: 0;
+    transform: scale(0.9);
+  }
+  to {
+    opacity: 0.9;
+    transform: scale(1.04);
+  }
+}
+
+/* While dragging an event, show a subtle overlay on the calendar */
+body.event-dragging .rbc-day-bg:hover {
+  background: var(--selection-bg) !important;
+}
+
+/* --- Respect user preference to disable animations --- */
+[data-animations="false"] *,
+[data-animations="false"] *::before,
+[data-animations="false"] *::after {
+  animation-duration: 0s !important;
+  animation-delay: 0s !important;
+  transition-duration: 0s !important;
 }

@@ -167,6 +167,22 @@ ipcMain.handle(
   }
 );
 
+ipcMain.handle(
+  "update-event",
+  async (
+    event,
+    { username, password, calendarUrl, eventId, eventData }
+  ) => {
+    return await caldavService.updateEvent(
+      username,
+      password,
+      calendarUrl,
+      eventId,
+      eventData
+    );
+  }
+);
+
 // IPC handlers for Settings
 ipcMain.handle("get-settings", async () => {
   try {
