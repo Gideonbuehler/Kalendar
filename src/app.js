@@ -1298,32 +1298,29 @@ class KalendarApp extends Component {
     if (!task) return;
 
     const newCompleted = !task.completed;
+    const taskName = task.name;
 
-    // Optimistic update for task list
+    // Single setState to update both taskLists and matching calendar events
+    // atomically, preventing intermediate re-renders that cause visual shifts
     this.setState((prevState) => ({
-      taskLists: prevState.taskLists.map((list) =>
-        list.id === listId
+      taskLists: prevState.taskLists.map((l) =>
+        l.id === listId
           ? {
-              ...list,
-              tasks: list.tasks.map((t) =>
+              ...l,
+              tasks: l.tasks.map((t) =>
                 t.id === taskId
                   ? { ...t, completed: newCompleted }
                   : t
               ),
             }
-          : list
+          : l
       ),
-    }));
-
-    // Also mark any matching calendar events as completed/uncompleted
-    // Match by title (task name) and description containing the list name
-    const taskName = task.name;
-    this.setState((prevState) => ({
       events: prevState.events.map((ev) => {
         const isMatch =
-          ev.title === taskName ||
-          (ev.description && ev.description.includes(`Task from list:`));
-        if (isMatch && ev.title === taskName) {
+          ev.title === taskName &&
+          (ev.title === taskName ||
+            (ev.description && ev.description.includes("Task from list:")));
+        if (isMatch) {
           return { ...ev, completed: newCompleted };
         }
         return ev;
@@ -1334,27 +1331,53 @@ class KalendarApp extends Component {
   };
 
   handleDeleteTask = (listId, taskId) => {
-    // Optimistic update
+    // Find the task name before deleting so we can also remove matching calendar events
+    const list = this.state.taskLists.find((l) => l.id === listId);
+    const task = list?.tasks.find((t) => t.id === taskId);
+    const taskName = task?.name;
+
+    // Atomically remove the task and any matching calendar events
     this.setState((prevState) => ({
-      taskLists: prevState.taskLists.map((list) =>
-        list.id === listId
-          ? { ...list, tasks: list.tasks.filter((task) => task.id !== taskId) }
-          : list
+      taskLists: prevState.taskLists.map((l) =>
+        l.id === listId
+          ? { ...l, tasks: l.tasks.filter((t) => t.id !== taskId) }
+          : l
       ),
+      events: taskName
+        ? prevState.events.filter((ev) => {
+            const isTaskEvent =
+              ev.title === taskName &&
+              ev.description &&
+              ev.description.includes("Task from list:");
+            return !isTaskEvent;
+          })
+        : prevState.events,
     }));
 
-    // TODO: Sync to CalDAV server using VTODO
     console.log("✓ Task deleted:", taskId, "from list:", listId);
   };
 
   handleDeleteList = (listId) => {
-    // Optimistic update
+    // Collect all task names in this list so we can remove their calendar events
+    const list = this.state.taskLists.find((l) => l.id === listId);
+    const taskNames = list?.tasks ? list.tasks.map((t) => t.name) : [];
+
+    // Atomically remove the list and all matching calendar events
     this.setState((prevState) => ({
-      taskLists: prevState.taskLists.filter((list) => list.id !== listId),
+      taskLists: prevState.taskLists.filter((l) => l.id !== listId),
+      events:
+        taskNames.length > 0
+          ? prevState.events.filter((ev) => {
+              const isTaskEvent =
+                taskNames.includes(ev.title) &&
+                ev.description &&
+                ev.description.includes("Task from list:");
+              return !isTaskEvent;
+            })
+          : prevState.events,
     }));
 
-    // TODO: Sync to CalDAV server using VTODO
-    console.log("✓ Task list deleted:", listId);
+    console.log("✓ Task list deleted:", listId, "with", taskNames.length, "tasks");
   };
   handleToggleTaskManager = () => {
     this.setState((prevState) => ({
@@ -1580,12 +1603,8 @@ class KalendarApp extends Component {
     }
   };
 
-  handleAddTaskList = () => {
-    const listName = prompt("Enter task list name:");
-    if (listName && listName.trim()) {
-      this.handleCreateList(listName.trim());
-    }
-  };
+  // handleAddTaskList is no longer needed — TaskManager uses inline forms
+  // and calls onCreateList / onCreateTask directly.
 
   handleTaskClick = (listId, taskId) => {
     // Open task modal for editing
@@ -1754,7 +1773,10 @@ class KalendarApp extends Component {
         onSettingsClick: () => this.setState({ showSettings: true }),
         onLogout: this.handleLogout,
         onToggleTaskManager: this.handleToggleTaskManager,
-        onAddTaskList: this.handleAddTaskList,
+        onCreateList: this.handleCreateList,
+        onCreateTask: this.handleCreateTask,
+        onDeleteTask: this.handleDeleteTask,
+        onDeleteList: this.handleDeleteList,
         onToggleTask: this.handleToggleTask,
         onTaskToCalendar: this.handleTaskToCalendar,
         onTaskClick: this.handleTaskClick,        onTaskDroppedOnCalendar: this.handleTaskDroppedOnCalendar,

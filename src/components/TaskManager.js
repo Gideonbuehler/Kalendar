@@ -22,7 +22,14 @@ class TaskManager extends React.Component {
       newListName: "",
       newTaskName: "",
       selectedList: null,
+      // Confirmation state: { type: 'list'|'task', listId, taskId?, name }
+      confirmDelete: null,
     };
+    this._confirmTimeout = null;
+  }
+
+  componentWillUnmount() {
+    if (this._confirmTimeout) clearTimeout(this._confirmTimeout);
   }
 
   toggleList = (listId) => {
@@ -38,8 +45,6 @@ class TaskManager extends React.Component {
     const { newListName } = this.state;
     if (newListName.trim()) {
       if (this.props.onCreateList) this.props.onCreateList(newListName.trim());
-      if (this.props.onAddTaskList)
-        this.props.onAddTaskList(newListName.trim());
       this.setState({ newListName: "", showNewListForm: false });
     }
   };
@@ -54,6 +59,51 @@ class TaskManager extends React.Component {
         showNewTaskForm: { ...this.state.showNewTaskForm, [listId]: false },
       });
     }
+  };
+
+  /** Shows the custom confirmation popup for deleting a list */
+  requestDeleteList = (e, list) => {
+    e.stopPropagation();
+    if (this._confirmTimeout) clearTimeout(this._confirmTimeout);
+    this.setState({
+      confirmDelete: {
+        type: "list",
+        listId: list.id,
+        name: list.name,
+        taskCount: list.tasks ? list.tasks.length : 0,
+      },
+    });
+  };
+
+  /** Shows the custom confirmation popup for deleting a task */
+  requestDeleteTask = (e, listId, task) => {
+    e.stopPropagation();
+    if (this._confirmTimeout) clearTimeout(this._confirmTimeout);
+    this.setState({
+      confirmDelete: {
+        type: "task",
+        listId: listId,
+        taskId: task.id,
+        name: task.name,
+      },
+    });
+  };
+
+  /** Confirms and executes the pending delete */
+  confirmDeleteAction = () => {
+    const { confirmDelete } = this.state;
+    if (!confirmDelete) return;
+
+    if (confirmDelete.type === "list") {
+      if (this.props.onDeleteList) this.props.onDeleteList(confirmDelete.listId);
+    } else if (confirmDelete.type === "task") {
+      if (this.props.onDeleteTask) this.props.onDeleteTask(confirmDelete.listId, confirmDelete.taskId);
+    }
+    this.setState({ confirmDelete: null });
+  };
+
+  cancelDelete = () => {
+    this.setState({ confirmDelete: null });
   };
 
   /**
@@ -238,6 +288,17 @@ class TaskManager extends React.Component {
                       title: "Add task",
                     },
                     "+"
+                  ),
+                  h(
+                    "button",
+                    {
+                      className: "sidebar-delete-list-btn",
+                      onClick: (e) => {
+                        this.requestDeleteList(e, list);
+                      },
+                      title: "Delete list",
+                    },
+                    "✕"
                   )
                 ),
 
@@ -347,6 +408,17 @@ class TaskManager extends React.Component {
                                 title: "Add to calendar",
                               },
                               "📅"
+                            ),
+                            h(
+                              "button",
+                              {
+                                className: "task-delete-btn",
+                                onClick: (e) => {
+                                  this.requestDeleteTask(e, list.id, task);
+                                },
+                                title: "Delete task",
+                              },
+                              "✕"
                             )
                           )
                         )
@@ -364,7 +436,63 @@ class TaskManager extends React.Component {
               { className: "no-tasks-sidebar" },
               "No task lists. Click + to create one."
             )
-      )
+      ),
+
+      // Custom Delete Confirmation Dialog
+      this.state.confirmDelete &&
+        h(
+          "div",
+          {
+            className: "task-confirm-overlay",
+            onClick: this.cancelDelete,
+          },
+          h(
+            "div",
+            {
+              className: "task-confirm-dialog",
+              onClick: (e) => e.stopPropagation(),
+            },
+            h(
+              "div",
+              { className: "task-confirm-icon" },
+              this.state.confirmDelete.type === "list" ? "🗑️" : "⚠️"
+            ),
+            h(
+              "div",
+              { className: "task-confirm-title" },
+              this.state.confirmDelete.type === "list"
+                ? "Delete task list?"
+                : "Delete task?"
+            ),
+            h(
+              "div",
+              { className: "task-confirm-message" },
+              this.state.confirmDelete.type === "list"
+                ? `"${this.state.confirmDelete.name}" and ${this.state.confirmDelete.taskCount === 1 ? "its 1 task" : "all " + this.state.confirmDelete.taskCount + " tasks"} will be permanently deleted.`
+                : `"${this.state.confirmDelete.name}" will be permanently deleted.`
+            ),
+            h(
+              "div",
+              { className: "task-confirm-actions" },
+              h(
+                "button",
+                {
+                  className: "task-confirm-btn task-confirm-cancel",
+                  onClick: this.cancelDelete,
+                },
+                "Cancel"
+              ),
+              h(
+                "button",
+                {
+                  className: "task-confirm-btn task-confirm-delete",
+                  onClick: this.confirmDeleteAction,
+                },
+                "Delete"
+              )
+            )
+          )
+        )
     );
   }
 }

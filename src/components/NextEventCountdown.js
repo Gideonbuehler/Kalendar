@@ -7,6 +7,7 @@
 //   2. Upcoming event: countdown with urgency coloring (critical/high/medium/low)
 //   3. No events: ✨ "No upcoming events"
 //
+// On hover, expands an animated dropdown showing ALL upcoming events.
 // Updates every 15 seconds via setInterval for a smooth live countdown.
 // ============================================================================
 
@@ -15,8 +16,10 @@ class NextEventCountdown extends React.Component {
     super(props);
     this.state = {
       now: new Date(),
+      isHovered: false,
     };
     this._interval = null;
+    this._hoverTimeout = null;
   }
 
   componentDidMount() {
@@ -28,41 +31,36 @@ class NextEventCountdown extends React.Component {
 
   componentWillUnmount() {
     if (this._interval) clearInterval(this._interval);
+    if (this._hoverTimeout) clearTimeout(this._hoverTimeout);
   }
 
   /**
-   * _getNextEvent — Finds the currently active or next upcoming event.
-   * Returns { event, type: 'active'|'upcoming' } or null.
-   * Active events take priority over upcoming ones.
+   * _getActiveEvent — Finds any currently active event.
+   * Returns the active event or null.
    */
-  _getNextEvent() {
+  _getActiveEvent() {
     const { events } = this.props;
     if (!events || events.length === 0) return null;
-
     const now = this.state.now;
-    // Find currently active event
-    const active = events
+    return events
       .filter((e) => !e.isPreview)
       .find((e) => {
         const s = new Date(e.start);
         const en = new Date(e.end);
         return now >= s && now <= en;
-      });
+      }) || null;
+  }
 
-    if (active) {
-      return { event: active, type: "active" };
-    }
-
-    // Find next upcoming event
-    const upcoming = events
+  /**
+   * _getUpcomingEvents — Returns all upcoming (future) events sorted by start time.
+   */
+  _getUpcomingEvents() {
+    const { events } = this.props;
+    if (!events || events.length === 0) return [];
+    const now = this.state.now;
+    return events
       .filter((e) => !e.isPreview && new Date(e.start) > now)
       .sort((a, b) => new Date(a.start) - new Date(b.start));
-
-    if (upcoming.length > 0) {
-      return { event: upcoming[0], type: "upcoming" };
-    }
-
-    return null;
   }
 
   _formatDuration(ms) {
@@ -86,11 +84,26 @@ class NextEventCountdown extends React.Component {
     return "low";
   }
 
+  _handleMouseEnter = () => {
+    if (this._hoverTimeout) clearTimeout(this._hoverTimeout);
+    this.setState({ isHovered: true });
+  };
+
+  _handleMouseLeave = () => {
+    this._hoverTimeout = setTimeout(() => {
+      this.setState({ isHovered: false });
+    }, 200);
+  };
+
   render() {
     const h = React.createElement;
-    const result = this._getNextEvent();
+    const active = this._getActiveEvent();
+    const upcoming = this._getUpcomingEvents();
+    const { isHovered } = this.state;
+    const now = this.state.now;
 
-    if (!result) {
+    // No events at all
+    if (!active && upcoming.length === 0) {
       return h(
         "div",
         { className: "next-event-countdown idle" },
@@ -99,50 +112,84 @@ class NextEventCountdown extends React.Component {
       );
     }
 
-    const { event, type } = result;
-    const now = this.state.now;
+    // Determine primary display event and urgency
+    const primaryEvent = active || upcoming[0];
+    const isActive = !!active;
+    const primaryStart = new Date(primaryEvent.start);
+    const primaryEnd = new Date(primaryEvent.end);
+    const diff = isActive ? (primaryEnd - now) : (primaryStart - now);
+    const timeStr = this._formatDuration(diff);
+    const urgency = isActive ? null : this._getUrgencyLevel(diff);
 
-    if (type === "active") {
-      const end = new Date(event.end);
-      const remaining = end - now;
-      const timeLeft = this._formatDuration(remaining);
-
-      return h(
-        "div",
-        { className: "next-event-countdown active", title: `${event.title} — ends in ${timeLeft}` },
-        h("span", { className: "next-event-pulse" }),
-        h("span", { className: "next-event-icon" }, "🔴"),
-        h(
-          "div",
-          { className: "next-event-info" },
-          h("span", { className: "next-event-title" }, event.title),
-          h("span", { className: "next-event-time" }, `${timeLeft} left`)
-        )
-      );
-    }
-
-    // Upcoming
-    const start = new Date(event.start);
-    const diff = start - now;
-    const timeUntil = this._formatDuration(diff);
-    const urgency = this._getUrgencyLevel(diff);
-
-    const startTime = start.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+    const wrapperClass = isActive
+      ? "next-event-countdown active"
+      : `next-event-countdown upcoming urgency-${urgency}`;
 
     return h(
       "div",
       {
-        className: `next-event-countdown upcoming urgency-${urgency}`,
-        title: `${event.title} at ${startTime}`,
+        className: `next-event-wrapper${isHovered && upcoming.length > (isActive ? 0 : 1) ? " expanded" : ""}`,
+        onMouseEnter: this._handleMouseEnter,
+        onMouseLeave: this._handleMouseLeave,
       },
-      urgency === "critical" && h("span", { className: "next-event-pulse" }),
-      h("span", { className: "next-event-icon" }, urgency === "critical" ? "⚡" : urgency === "high" ? "🔔" : "⏳"),
+
+      // Primary pill
       h(
         "div",
-        { className: "next-event-info" },
-        h("span", { className: "next-event-title" }, event.title),
-        h("span", { className: "next-event-time" }, `in ${timeUntil}`)
-      )
+        {
+          className: wrapperClass,
+          title: isActive
+            ? `${primaryEvent.title} — ends in ${timeStr}`
+            : `${primaryEvent.title} at ${primaryStart.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}`,
+        },
+        (isActive || urgency === "critical") && h("span", { className: "next-event-pulse" }),
+        h("span", { className: "next-event-icon" },
+          isActive ? "🔴"
+            : urgency === "critical" ? "⚡"
+            : urgency === "high" ? "🔔"
+            : "⏳"
+        ),
+        h(
+          "div",
+          { className: "next-event-info" },
+          h("span", { className: "next-event-title" }, primaryEvent.title),
+          h("span", { className: "next-event-time" }, isActive ? `${timeStr} left` : `in ${timeStr}`)
+        ),
+        // Show chevron hint if there are more events
+        upcoming.length > (isActive ? 0 : 1) &&
+          h("span", { className: "next-event-expand-hint" }, "▾")
+      ),
+
+      // Dropdown with all upcoming events (shown on hover)
+      upcoming.length > (isActive ? 0 : 1) &&
+        h(
+          "div",
+          { className: "next-event-dropdown" },
+          upcoming.slice(isActive ? 0 : 1, 6).map((ev, i) => {
+            const evStart = new Date(ev.start);
+            const evDiff = evStart - now;
+            const evTime = this._formatDuration(evDiff);
+            const evStartStr = evStart.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+
+            return h(
+              "div",
+              {
+                key: ev.id || i,
+                className: "next-event-dropdown-item",
+                style: { animationDelay: `${i * 40}ms` },
+              },
+              h("span", { className: "next-event-dropdown-time" }, evStartStr),
+              h("span", { className: "next-event-dropdown-title" }, ev.title),
+              h("span", { className: "next-event-dropdown-countdown" }, `in ${evTime}`)
+            );
+          }),
+          upcoming.length > (isActive ? 6 : 7) &&
+            h(
+              "div",
+              { className: "next-event-dropdown-more" },
+              `+${upcoming.length - (isActive ? 6 : 7)} more`
+            )
+        )
     );
   }
 }
