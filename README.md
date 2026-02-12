@@ -1,10 +1,10 @@
-# 📅 Kalendar
+# Kalendar
 
 A beautiful, highly customizable desktop calendar application for Nextcloud built with Electron and React.
 
-## ✨ Features
+## Features
 
-### 🎨 Highly Customizable
+### Highly Customizable
 
 - **Dark Mode** - Full dark theme support with auto-detection
 - **Custom Colors** - Choose your own primary and accent colors
@@ -12,7 +12,7 @@ A beautiful, highly customizable desktop calendar application for Nextcloud buil
 - **Compact Mode** - Reduce spacing for a more condensed view
 - **Animations** - Toggle smooth transitions and animations
 
-### 📆 Calendar Features
+### Calendar Features
 
 - **Multiple Views** - Month, Week, Day, and Agenda views
 - **Event Creation** - Create events with title, time, location, and description
@@ -22,13 +22,13 @@ A beautiful, highly customizable desktop calendar application for Nextcloud buil
 - **Customizable First Day** - Start week on Sunday or Monday
 - **Time Formats** - Choose between 12-hour and 24-hour formats
 
-### 🔐 Secure
+### Secure
 
 - **App Password Support** - Use Nextcloud app-specific passwords
 - **Local Settings** - All preferences stored locally
 - **Secure Authentication** - CalDAV protocol with proper authentication
 
-## 🏗️ Project Structure
+## Project Structure
 
 ```
 kalendar/
@@ -48,7 +48,7 @@ kalendar/
 └── package.json            # Dependencies
 ```
 
-## 🚀 Getting Started
+## Getting Started
 
 #### Prerequisites
 
@@ -85,7 +85,7 @@ npm start
 
 The app will automatically append the CalDAV path (`/remote.php/dav`) to your server URL.
 
-## ⚙️ Settings
+## Settings
 
 Access settings by clicking the gear icon (⚙️) in the top-right corner.
 
@@ -105,13 +105,11 @@ Access settings by clicking the gear icon (⚙️) in the top-right corner.
 - **Default View**: Month, Week, Day, or Agenda
 - **Show Week Numbers**: Display week numbers in calendar
 
-## 📝 License
+## License
 
 MIT License - feel free to use this project for personal or commercial purposes.
 
----
 
-Made with ❤️ for the Nextcloud community
 
 For better security, create an App Password in Nextcloud:
 
