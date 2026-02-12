@@ -1,6 +1,22 @@
-// Utility Functions for Kalendar
+// ============================================================================
+// Utility Functions — helpers.js
+// ============================================================================
+// Shared utility functions used across the renderer process.
+// Exported globally via window.KalendarUtils for use in any component.
+//
+// Categories:
+//   - Date/Time formatting (formatDateTimeLocal, formatDate, formatTime)
+//   - Color utilities (hex validation, hex↔rgb conversion)
+//   - Theme detection (system dark/light mode)
+//   - Input validation (email, URL)
+//   - LocalStorage persistence helpers
+// ============================================================================
 
-// Date/Time Formatting
+// ── Date/Time Formatting ───────────────────────────────────────────────
+
+/**
+ * Converts a Date to "YYYY-MM-DDTHH:MM" for <input type="datetime-local">.
+ */
 const formatDateTimeLocal = (date) => {
   const d = new Date(date);
   const year = d.getFullYear();
@@ -11,6 +27,10 @@ const formatDateTimeLocal = (date) => {
   return `${year}-${month}-${day}T${hours}:${minutes}`;
 };
 
+/**
+ * Formats a date for display.
+ * @param {'short'|'long'} format - "short" = locale default, "long" = full weekday + month
+ */
 const formatDate = (date, format = "short") => {
   const d = new Date(date);
   if (format === "short") {
@@ -26,6 +46,7 @@ const formatDate = (date, format = "short") => {
   return d.toISOString();
 };
 
+/** Formats a time string, optionally in 24-hour format. */
 const formatTime = (date, use24Hour = false) => {
   const d = new Date(date);
   return d.toLocaleTimeString("en-US", {
@@ -35,11 +56,14 @@ const formatTime = (date, use24Hour = false) => {
   });
 };
 
-// Color Utilities
+// ── Color Utilities ───────────────────────────────────────────────────
+
+/** Validates that a string is a 6-digit hex color (e.g., "#5e72e4"). */
 const isValidHexColor = (color) => {
   return /^#[0-9A-Fa-f]{6}$/.test(color);
 };
 
+/** Converts a hex color string to an {r, g, b} object. Returns null on invalid input. */
 const hexToRgb = (hex) => {
   const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
   return result
@@ -51,11 +75,14 @@ const hexToRgb = (hex) => {
     : null;
 };
 
+/** Converts individual r, g, b values (0–255) to a hex color string. */
 const rgbToHex = (r, g, b) => {
   return "#" + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
 };
 
-// Theme Detection
+// ── Theme Detection ──────────────────────────────────────────────────
+
+/** Returns "dark" or "light" based on the OS-level color scheme preference. */
 const getSystemTheme = () => {
   if (
     window.matchMedia &&
@@ -66,11 +93,14 @@ const getSystemTheme = () => {
   return "light";
 };
 
-// Validation
+// ── Validation ───────────────────────────────────────────────────────
+
+/** Basic email format validation (not RFC 5322 compliant). */
 const isValidEmail = (email) => {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 };
 
+/** Checks if a string is a valid URL using the native URL constructor. */
 const isValidUrl = (url) => {
   try {
     new URL(url);
@@ -80,7 +110,11 @@ const isValidUrl = (url) => {
   }
 };
 
-// Local Storage Helpers
+// ── Local Storage Helpers ────────────────────────────────────────────
+// Used for persisting lightweight data in the renderer (e.g., saved credentials).
+// For heavy/structured settings, settingsService.js (main process) is preferred.
+
+/** Serializes a value as JSON and writes it to localStorage. */
 const saveToLocalStorage = (key, value) => {
   try {
     localStorage.setItem(key, JSON.stringify(value));
@@ -91,6 +125,7 @@ const saveToLocalStorage = (key, value) => {
   }
 };
 
+/** Reads and deserializes a JSON value from localStorage. Returns defaultValue if missing. */
 const loadFromLocalStorage = (key, defaultValue = null) => {
   try {
     const item = localStorage.getItem(key);
@@ -101,7 +136,7 @@ const loadFromLocalStorage = (key, defaultValue = null) => {
   }
 };
 
-// Export for use in other modules (if needed)
+// Export all utilities as a global namespace for use in CDN-loaded components
 if (typeof window !== "undefined") {
   window.KalendarUtils = {
     formatDateTimeLocal,

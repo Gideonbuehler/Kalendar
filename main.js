@@ -1,12 +1,32 @@
+// ============================================================================
+// Electron Main Process — main.js
+// ============================================================================
+// Entry point for the Electron desktop application.
+// Responsibilities:
+//   1. Create and manage the main BrowserWindow
+//   2. Register IPC handlers that bridge the renderer process to backend services
+//   3. Route CalDAV operations (connect, CRUD events/calendars, sharing)
+//   4. Route settings operations (load, save, reset from JSON file)
+//
+// Architecture:
+//   Renderer (src/app.js) ──IPC──▶ main.js ──▶ caldavService / settingsService
+// ============================================================================
+
 const { app, BrowserWindow, ipcMain } = require("electron");
 const path = require("path");
 
-// Import services
+// Backend services — loaded in the main process (Node.js context)
 const caldavService = require("./src/services/caldavService");
 const settingsService = require("./src/services/settingsService");
 
+/** @type {BrowserWindow|null} Reference to the main application window */
 let mainWindow;
 
+/**
+ * createWindow — Initializes the Electron BrowserWindow.
+ * Starts maximized with node integration enabled so that
+ * the renderer can use `require('electron')` for IPC.
+ */
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1200,
@@ -22,25 +42,32 @@ function createWindow() {
   mainWindow.loadFile("index.html");
   mainWindow.show(); // Show the window when it's ready
 
-  // Open DevTools in development
-  mainWindow.webContents.openDevTools();
+  // Open DevTools only in development
+  if (process.env.NODE_ENV !== 'production' && !app.isPackaged) {
+    mainWindow.webContents.openDevTools();
+  }
 }
 
+// Launch the window once Electron is ready
 app.whenReady().then(createWindow);
 
+// Quit the app when all windows are closed (except on macOS)
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") {
     app.quit();
   }
 });
 
+// macOS: re-create window when dock icon is clicked and no windows exist
 app.on("activate", () => {
   if (BrowserWindow.getAllWindows().length === 0) {
     createWindow();
   }
 });
 
-// IPC handlers for CalDAV operations
+// ── IPC Handlers — CalDAV Operations ─────────────────────────────────────
+// Each handler receives arguments from the renderer via ipcRenderer.invoke()
+// and delegates to the corresponding caldavService method.
 ipcMain.handle(
   "connect-caldav",
   async (event, { serverUrl, username, password }) => {
@@ -183,7 +210,10 @@ ipcMain.handle(
   }
 );
 
-// IPC handlers for Settings
+// ── IPC Handlers — Settings ─────────────────────────────────────────────
+// Persists user preferences (theme, colors, calendar defaults) to a JSON
+// file in the Electron userData directory.
+
 ipcMain.handle("get-settings", async () => {
   try {
     const settings = settingsService.getSettings();

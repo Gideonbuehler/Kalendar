@@ -1,4 +1,22 @@
-// Event Insights Component — smart pattern detection and schedule analysis
+// ============================================================================
+// EventInsights Component — EventInsights.js
+// ============================================================================
+// Smart pattern detection and schedule analysis widget.
+// Displayed in the Activity tab of the sidebar.
+//
+// Insights generated:
+//   1. Busiest day of the week (by event count)
+//   2. Most repeated event title
+//   3. Average events per day (last 2 weeks)
+//   4. Peak hour (most events start at)
+//   5. Free time remaining today (within 8am–6pm working window)
+//   6. Longest upcoming event
+//   7. Task completion rate (across all task lists)
+//
+// Each insight includes an emoji icon, text, detail, and a type
+// (stat/pattern/positive/warning) for styling differentiation.
+// ============================================================================
+
 class EventInsights extends React.Component {
   constructor(props) {
     super(props);

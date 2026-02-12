@@ -1,13 +1,29 @@
-// Mini Calendar Sidebar Component — with tabbed Calendar / Activity views
+// ============================================================================
+// MiniCalendar Component — MiniCalendar.js
+// ============================================================================
+// Left sidebar component that provides:
+//   - Tabbed navigation (Calendar / Activity views)
+//   - Compact month grid with event dots and today highlighting
+//   - DayTimeline showing today's events at a glance
+//   - Calendar list with color swatches, checkboxes, and settings buttons
+//   - Task manager section with expandable lists
+//   - ProductivityHeatmap and EventInsights in the Activity tab
+// ============================================================================
+
 class MiniCalendar extends React.Component {
   constructor(props) {
     super(props);
     this.state = {
-      displayMonth: new Date(),
-      activeTab: "calendar", // "calendar" | "activity"
+      displayMonth: new Date(),    // The month currently shown in the mini grid
+      activeTab: "calendar",       // Which tab is selected: "calendar" | "activity"
     };
   }
 
+  /**
+   * getDaysInMonth — Builds a 6-week (42-cell) array for the mini calendar grid.
+   * Includes trailing days from the previous month and leading days from the
+   * next month so the grid is always a complete rectangle.
+   */
   getDaysInMonth(date) {
     const year = date.getFullYear();
     const month = date.getMonth();
@@ -106,6 +122,7 @@ class MiniCalendar extends React.Component {
     return colors[index % colors.length];
   }
 
+  /** Renders the Calendar tab: mini month grid + DayTimeline below it. */
   renderCalendarTab() {
     const { displayMonth } = this.state;
     const { selectedDate } = this.props;
@@ -162,6 +179,7 @@ class MiniCalendar extends React.Component {
     );
   }
 
+  /** Renders the Activity tab: ProductivityHeatmap + EventInsights widgets. */
   renderActivityTab() {
     return h(
       "div",

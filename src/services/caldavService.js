@@ -1,17 +1,48 @@
-// CalDAV Service - Handles all CalDAV operations
+// ============================================================================
+// CalDAV Service — caldavService.js
+// ============================================================================
+// Handles all communication with the CalDAV/Nextcloud server.
+// Runs in the Electron main process (Node.js context).
+//
+// Operations supported:
+//   - connect()           — Authenticate and discover calendars
+//   - fetchEvents()       — REPORT query for VEVENT components
+//   - createEvent()       — PUT a new .ics event file
+//   - updateEvent()       — GET existing → modify → PUT back
+//   - deleteEvent()       — DELETE an .ics file by UID
+//   - createCalendar()    — MKCALENDAR with display name + color
+//   - updateCalendarColor/Name() — PROPPATCH
+//   - shareCalendar()     — POST with ownCloud sharing namespace
+//   - getCalendarShares() — PROPFIND for ACL
+//   - removeCalendarShare() — POST with ownCloud un-share
+//
+// Uses the `dav` library for initial account discovery, and raw HTTP
+// requests (via Node's http/https modules) for all other operations.
+// iCal parsing/generation is handled by the `ical.js` (ICAL) library.
+// ============================================================================
+
 const dav = require("dav");
 const ICAL = require("ical.js");
 const https = require("https");
 const http = require("http");
 const { URL } = require("url");
 
+/**
+ * CalDAVService — Singleton service for all server-side calendar operations.
+ * Maintains a reference to the last-used credentials for convenience,
+ * but each IPC call receives credentials explicitly for safety.
+ */
 class CalDAVService {
   constructor() {
-    this.credentials = null;
-    this.serverUrl = null;
+    this.credentials = null; // Cached credentials from last successful connect()
+    this.serverUrl = null;   // Cached server URL
   }
 
-  // Helper method to make HTTP/HTTPS requests that works in Electron
+  /**
+   * makeRequest — Low-level HTTP/HTTPS request helper.
+   * Works in Electron's main process (no browser fetch/XMLHttpRequest).
+   * Handles Basic auth, self-signed certificates, and streaming response body.
+   */
   makeRequest(method, url, data, headers, username, password) {
     return new Promise((resolve, reject) => {
       const parsedUrl = new URL(url);
@@ -69,6 +100,10 @@ class CalDAVService {
     });
   }
 
+  /**
+   * normalizeServerUrl — Ensures the server URL ends with /remote.php/dav
+   * (the standard Nextcloud CalDAV endpoint). Strips trailing slashes.
+   */
   normalizeServerUrl(serverUrl) {
     let normalizedUrl = serverUrl.trim();
 
@@ -83,6 +118,7 @@ class CalDAVService {
     return normalizedUrl;
   }
 
+  /** Creates a dav.transport.Basic instance for the `dav` library's account discovery. */
   createXHR(username, password) {
     return new dav.transport.Basic(
       new dav.Credentials({
@@ -91,6 +127,12 @@ class CalDAVService {
       })
     );
   }
+  /**
+   * connect — Authenticates with the CalDAV server and discovers calendars.
+   * Uses the `dav` library's createAccount() which performs PROPFIND to
+   * enumerate all calendars (VEVENT + VTODO collections).
+   * Returns { success, calendars[] } or { success: false, error }.
+   */
   async connect(serverUrl, username, password) {
     try {
       const normalizedUrl = this.normalizeServerUrl(serverUrl);
@@ -168,6 +210,12 @@ class CalDAVService {
       return { success: false, error: userMessage };
     }
   }
+  /**
+   * fetchEvents — Retrieves all VEVENT items from a calendar.
+   * Sends a CalDAV REPORT request with a calendar-query filter,
+   * then parses each iCalendar response using ical.js.
+   * Returns { success, events[] } where each event has id, title, start, end, etc.
+   */
   async fetchEvents(username, password, calendar, calendarUrl) {
     try {
       if (!username || !password || (!calendar && !calendarUrl)) {
@@ -313,6 +361,12 @@ class CalDAVService {
     }
   }
 
+  /**
+   * createEvent — Creates a new event on the CalDAV server.
+   * Builds an iCalendar (VCALENDAR/VEVENT) string using ical.js,
+   * then PUTs it to the calendar URL as a new .ics file.
+   * Uses "If-None-Match: *" to prevent overwriting existing events.
+   */
   async createEvent(username, password, calendar, calendarUrl, eventData) {
     try {
       console.log("Creating event with:", {
@@ -438,6 +492,10 @@ class CalDAVService {
     }
   }
 
+  /**
+   * deleteEvent — Removes an event from the server by sending HTTP DELETE
+   * to the event's .ics URL (calendarUrl + eventId + ".ics").
+   */
   async deleteEvent(username, password, calendarUrl, eventId) {
     try {
       console.log("Deleting event:", {
@@ -509,6 +567,12 @@ class CalDAVService {
     }
   }
 
+  /**
+   * updateEvent — Modifies an existing event on the server.
+   * Flow: GET the existing .ics → parse with ical.js → update fields → PUT back.
+   * This preserves any server-side properties (alarms, attendees, etc.)
+   * that Kalendar doesn't manage.
+   */
   async updateEvent(username, password, calendarUrl, eventId, eventData) {
     try {
       console.log("Updating event:", { calendarUrl, eventId, eventData });
@@ -615,6 +679,11 @@ class CalDAVService {
     }
   }
 
+  /**
+   * createCalendar — Creates a new calendar collection on the Nextcloud server.
+   * Sends a MKCALENDAR request with display name, color, and component type.
+   * The calendar ID is derived from the name + timestamp for uniqueness.
+   */
   async createCalendar(
     username,
     password,
@@ -709,6 +778,11 @@ class CalDAVService {
     }
   }
 
+  /**
+   * updateCalendarColor — Changes a calendar's color via PROPPATCH.
+   * Uses the Apple iCal namespace (http://apple.com/ns/ical/) which
+   * Nextcloud supports for calendar-color.
+   */
   async updateCalendarColor(username, password, calendarUrl, color) {
     try {
       console.log("Updating calendar color:", { calendarUrl, color });
@@ -759,6 +833,9 @@ class CalDAVService {
     }
   }
 
+  /**
+   * updateCalendarName — Renames a calendar via PROPPATCH on DAV:displayname.
+   */
   async updateCalendarName(username, password, calendarUrl, displayName) {
     try {
       console.log("Updating calendar name:", { calendarUrl, displayName });
@@ -812,6 +889,12 @@ class CalDAVService {
       return { success: false, error: error.message || String(error) };
     }
   }
+  /**
+   * shareCalendar — Shares a calendar with another Nextcloud user.
+   * Uses the ownCloud sharing namespace (http://owncloud.org/ns).
+   * Note: Requires specific Nextcloud server configuration to work.
+   * The shareWithEmail is converted to a principal URL.
+   */
   async shareCalendar(
     username,
     password,
@@ -903,6 +986,10 @@ class CalDAVService {
     }
   }
 
+  /**
+   * getCalendarShares — Fetches the ACL (access control list) for a calendar.
+   * Currently returns an empty shares array — full ACL parsing is TODO.
+   */
   async getCalendarShares(username, password, calendarUrl) {
     try {
       console.log("Fetching calendar shares:", calendarUrl);
@@ -951,6 +1038,10 @@ class CalDAVService {
       };
     }
   }
+  /**
+   * removeCalendarShare — Revokes a previously shared calendar.
+   * Sends a POST with the ownCloud un-share XML body.
+   */
   async removeCalendarShare(username, password, calendarUrl, shareEmail) {
     try {
       console.log("Removing calendar share:", { calendarUrl, shareEmail });
@@ -998,6 +1089,7 @@ class CalDAVService {
     }
   }
 
+  /** Escapes special XML characters to prevent injection in PROPPATCH/MKCALENDAR bodies. */
   escapeXml(unsafe) {
     return unsafe
       .replace(/&/g, "&amp;")
@@ -1008,4 +1100,5 @@ class CalDAVService {
   }
 }
 
+// Export a singleton instance — shared across all IPC handlers
 module.exports = new CalDAVService();
