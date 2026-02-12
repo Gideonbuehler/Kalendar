@@ -1,4 +1,17 @@
-// Task Manager Component - Inline Sidebar Section
+// ============================================================================
+// TaskManager Component — TaskManager.js
+// ============================================================================
+// Inline sidebar section for managing task lists and individual tasks.
+// Features:
+//   - Expandable/collapsible task lists with colored dots
+//   - Inline forms for creating new lists and tasks
+//   - Task completion toggles with progress counters
+//   - Drag-and-drop tasks onto the calendar (creates calendar events)
+//   - Custom drag images with themed styling
+//
+// Task data is currently stored locally in state. TODO: Sync via CalDAV VTODO.
+// ============================================================================
+
 class TaskManager extends React.Component {
   constructor(props) {
     super(props);
@@ -43,6 +56,12 @@ class TaskManager extends React.Component {
     }
   };
 
+  /**
+   * handleDragStart — Initiates a native HTML5 drag from a task element.
+   * Sets application/json data for the drop handler, creates a styled
+   * drag image (ghost), and notifies the parent CalendarView to start
+   * tracking the drag for preview rendering.
+   */
   handleDragStart = (e, task, list) => {
     const dragData = JSON.stringify({
       type: "task",
@@ -80,6 +99,17 @@ class TaskManager extends React.Component {
       });
     }
   };
+
+  getListColor(listName) {
+    const colors = [
+      "#5e72e4", "#11cdef", "#2dce89", "#fb6340",
+      "#f5365c", "#ffd600", "#172b4d", "#8965e0",
+    ];
+    const index = listName
+      .split("")
+      .reduce((acc, char) => acc + char.charCodeAt(0), 0);
+    return colors[index % colors.length];
+  }
 
   render() {
     const { taskLists, onToggleTask, onDeleteTask, onDeleteList } = this.props;
@@ -174,6 +204,10 @@ class TaskManager extends React.Component {
                     { className: "expand-icon" },
                     expandedLists[list.id] ? "▾" : "▸"
                   ),
+                  h("span", {
+                    className: "list-color-dot",
+                    style: { backgroundColor: this.getListColor(list.name) },
+                  }),
                   h("span", { className: "list-name-compact" }, list.name),
                   h(
                     "span",
@@ -268,6 +302,7 @@ class TaskManager extends React.Component {
                               className: `sidebar-task-item ${
                                 task.completed ? "completed" : ""
                               }`,
+                              style: { '--list-color': this.getListColor(list.name) },
                               draggable: true,
                               onDragStart: (e) =>
                                 this.handleDragStart(e, task, list),
@@ -282,6 +317,9 @@ class TaskManager extends React.Component {
                               type: "checkbox",
                               className: "sidebar-task-checkbox",
                               checked: task.completed || false,
+                              onClick: (e) => {
+                                e.stopPropagation();
+                              },
                               onChange: (e) => {
                                 e.stopPropagation();
                                 if (onToggleTask)

@@ -1,4 +1,11 @@
-// Context Menu Component for Event Actions
+// ============================================================================
+// ContextMenu Component — ContextMenu.js
+// ============================================================================
+// A floating right-click context menu for event actions (Edit / Delete).
+// Positioned at the click coordinates and automatically repositioned if
+// it would overflow the viewport edges. Closes on outside click.
+// ============================================================================
+
 class ContextMenu extends React.Component {
   constructor(props) {
     super(props);
@@ -6,6 +13,7 @@ class ContextMenu extends React.Component {
     this.handleClickOutside = this.handleClickOutside.bind(this);
   }
 
+  // Register global listeners to detect clicks outside the menu
   componentDidMount() {
     document.addEventListener("mousedown", this.handleClickOutside);
     document.addEventListener("contextmenu", this.handleContextMenu);
@@ -28,6 +36,34 @@ class ContextMenu extends React.Component {
       e.preventDefault();
     }
   };
+
+  // Reposition menu if it would extend beyond the viewport edges
+  componentDidUpdate(prevProps) {
+    // Reposition menu if it would go off-screen
+    if (this.props.visible && this.menuRef.current) {
+      const menu = this.menuRef.current;
+      const rect = menu.getBoundingClientRect();
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
+      const pad = 8;
+      let newLeft = this.props.x;
+      let newTop = this.props.y;
+
+      if (rect.right > vw - pad) {
+        newLeft = vw - rect.width - pad;
+      }
+      if (rect.bottom > vh - pad) {
+        newTop = vh - rect.height - pad;
+      }
+      if (newLeft < pad) newLeft = pad;
+      if (newTop < pad) newTop = pad;
+
+      if (newLeft !== this.props.x || newTop !== this.props.y) {
+        menu.style.left = `${newLeft}px`;
+        menu.style.top = `${newTop}px`;
+      }
+    }
+  }
 
   render() {
     const { visible, x, y, onEdit, onDelete, onClose, event } = this.props;

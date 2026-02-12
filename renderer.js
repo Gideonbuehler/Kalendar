@@ -1,3 +1,12 @@
+// ============================================================================
+// renderer.js — Legacy Renderer (DEPRECATED)
+// ============================================================================
+// This was the original renderer process entry point before the app was
+// refactored to use src/app.js as the main application component.
+// Kept for reference but NOT loaded by index.html.
+// The active renderer is src/app.js.
+// ============================================================================
+
 const { ipcRenderer } = require("electron");
 
 // Use globals from CDN

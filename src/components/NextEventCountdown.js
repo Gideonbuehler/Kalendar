@@ -1,4 +1,15 @@
-// Next Event Countdown Component — live countdown to your next event in the header
+// ============================================================================
+// NextEventCountdown Component — NextEventCountdown.js
+// ============================================================================
+// Live countdown timer displayed in the app header.
+// Shows one of three states:
+//   1. Active event: 🔴 pulse + "[title] — Xh Ym left"
+//   2. Upcoming event: countdown with urgency coloring (critical/high/medium/low)
+//   3. No events: ✨ "No upcoming events"
+//
+// Updates every 15 seconds via setInterval for a smooth live countdown.
+// ============================================================================
+
 class NextEventCountdown extends React.Component {
   constructor(props) {
     super(props);
@@ -19,6 +30,11 @@ class NextEventCountdown extends React.Component {
     if (this._interval) clearInterval(this._interval);
   }
 
+  /**
+   * _getNextEvent — Finds the currently active or next upcoming event.
+   * Returns { event, type: 'active'|'upcoming' } or null.
+   * Active events take priority over upcoming ones.
+   */
   _getNextEvent() {
     const { events } = this.props;
     if (!events || events.length === 0) return null;

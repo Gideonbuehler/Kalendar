@@ -1,3 +1,19 @@
+/* ============================================================================
+ * styles.css — Base & Fallback Styles
+ * ============================================================================
+ * Root-level stylesheet with foundational styles and overrides for:
+ *   - CSS reset (box-sizing, margin/padding)
+ *   - Login form layout and styling
+ *   - Generic button styles (.btn-primary, .btn-secondary)
+ *   - App layout container and header
+ *   - Modal overlay and dialog base styles
+ *   - react-big-calendar visual overrides (event colors, toolbar, today cell)
+ *
+ * Note: Most application styles live in src/styles/main.css and theme.css.
+ * This file provides fallbacks and base overrides that don't depend on
+ * CSS custom properties.
+ * ============================================================================ */
+
 * {
   margin: 0;
   padding: 0;
@@ -193,7 +209,11 @@ body {
   flex: 1;
 }
 
-/* Calendar Styling Overrides */
+/* ── react-big-calendar Visual Overrides ──────────────────────────────────── */
+/* These override the default react-big-calendar CDN styles to match
+ * Kalendar's design language. Event selection uses filter: brightness()
+ * instead of background-color to preserve inline calendar color strips. */
+
 .rbc-calendar {
   font-family: inherit;
 }
@@ -204,7 +224,8 @@ body {
 }
 
 .rbc-event.rbc-selected {
-  background-color: #5568d3;
+  filter: brightness(0.9);
+  outline: 2px solid rgba(255, 255, 255, 0.5);
 }
 
 .rbc-today {

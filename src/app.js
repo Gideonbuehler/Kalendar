@@ -1,21 +1,68 @@
-// Main Application Component
+// ============================================================================
+// Main Application Component — KalendarApp
+// ============================================================================
+// Root React component that orchestrates the entire Kalendar application.
+// Manages all top-level state including authentication, calendar data,
+// events, tasks, UI modals, and user settings. Communicates with the
+// Electron main process via IPC for CalDAV operations and persistence.
+// ============================================================================
+
+// Electron IPC bridge for communicating with the main process (CalDAV, settings)
 const { ipcRenderer } = require("electron");
 const { Component } = React;
+
+// React Big Calendar — the core calendar rendering library
 const { Calendar } = ReactBigCalendar;
 const { momentLocalizer } = ReactBigCalendar;
+
+// Optional drag-and-drop support (loaded from CDN, may not be present)
 const { DragDropContext } = window.ReactDnD || {};
 const { HTML5Backend } = window.ReactDnDHTML5Backend || {};
 
+// Initialize the Moment.js-based localizer for react-big-calendar
 const localizer = momentLocalizer(moment);
+
+/**
+ * Debounce helper — delays invoking `fn` until `wait` ms have elapsed
+ * since the last invocation. Used to batch rapid settings saves.
+ */
+function debounce(fn, wait) {
+  let t = null;
+  return function (...args) {
+    if (t) clearTimeout(t);
+    t = setTimeout(() => {
+      t = null;
+      try {
+        fn(...args);
+      } catch (e) {
+        console.error("Debounced function error:", e);
+      }
+    }, wait);
+  };
+}
 
 // Check if DnD is available
 const withDragAndDrop = ReactBigCalendar.withDragAndDrop || ((comp) => comp);
 
+/**
+ * KalendarApp — The root component of the application.
+ *
+ * State is organized into the following sections:
+ *   - Authentication: connection status, server URL, credentials
+ *   - Calendar Data: calendars list, selected calendars, events cache
+ *   - UI State: modal visibility flags, loading indicators, errors
+ *   - Event Creation/Editing: form data for the event modal
+ *   - Tasks: local task lists (future: synced via CalDAV VTODO)
+ *   - Settings: theme, colors, font size, calendar preferences
+ *
+ * All server communication is done through Electron IPC → main.js → caldavService.
+ * UI updates use an optimistic pattern: update state immediately, then sync to server.
+ */
 class KalendarApp extends Component {
   constructor(props) {
     super(props);
     this.state = {
-      // Authentication
+      // Authentication — tracks whether the user is connected to a CalDAV server
       isConnected: false,
       serverUrl: "",
       username: "",
@@ -122,13 +169,28 @@ class KalendarApp extends Component {
       },      // Creative features
       currentView: "month",
     };
+    // Debounced settings saver to avoid frequent IPC + disk writes
+    this._debouncedSaveSettings = debounce((s) => {
+      try {
+        ipcRenderer.invoke("save-settings", s);
+      } catch (e) {
+        console.error("Failed to invoke save-settings:", e);
+      }
+    }, 700);
   }
+  /**
+   * componentDidMount — App initialization sequence:
+   * 1. Register global keyboard shortcut listeners
+   * 2. Load persisted settings from disk (via main process)
+   * 3. Apply theme/color/font settings to the DOM
+   * 4. Auto-login if saved credentials exist
+   */
   async componentDidMount() {
     // Global keyboard shortcuts (reserved for future use)
     this._handleKeyDown = (e) => {};
     document.addEventListener("keydown", this._handleKeyDown);
 
-    // Load settings from main process
+    // Load settings from main process (stored in userData/settings.json)
     const result = await ipcRenderer.invoke("get-settings");
     if (result.success) {
       this.setState({ settings: result.settings }, () => {
@@ -161,11 +223,16 @@ class KalendarApp extends Component {
     }
   }
 
+  /**
+   * applySettings — Pushes current settings into the DOM.
+   * Sets data-attributes and CSS custom properties on <html> so that
+   * theme.css and main.css can react to the user's preferences.
+   */
   applySettings() {
     const { settings } = this.state;
     const root = document.documentElement;
 
-    // Apply theme
+    // Apply theme (light / dark / auto-detect from OS)
     root.setAttribute(
       "data-theme",
       settings.theme === "auto" ? this.getSystemTheme() : settings.theme
@@ -192,11 +259,13 @@ class KalendarApp extends Component {
       : "light";
   }
 
+  // Generic input handler — updates top-level state fields by input name
   handleInputChange = (e) => {
     const { name, value } = e.target;
     this.setState({ [name]: value });
   };
 
+  // Event-specific input handler — updates fields within `newEvent` state object
   handleEventInputChange = (e) => {
     const { name, value } = e.target;
     this.setState((prevState) => ({
@@ -216,8 +285,17 @@ class KalendarApp extends Component {
     }));
   };
 
+  /**
+   * handleLoginSubmit — Authenticates with the CalDAV server.
+   *
+   * Flow:
+   * 1. Send credentials to main process via "connect-caldav" IPC
+   * 2. On success: save credentials (if rememberMe), store calendars in state
+   * 3. Auto-select all event-capable calendars (VEVENT)
+   * 4. Fetch events from all selected calendars
+   * 5. On failure: display error message, keep login form visible
+   */
   handleLoginSubmit = (credentials) => {
-    // Helper to process login with provided credentials
     const { serverUrl, username, password, rememberMe } = credentials;
 
     this.setState(
@@ -353,6 +431,11 @@ class KalendarApp extends Component {
     });
   };
 
+  /**
+   * fetchEvents — Fetches events from a single calendar.
+   * Used when switching the active calendar. For multi-calendar fetching,
+   * see fetchAllCalendarEvents() below.
+   */
   fetchEvents = async (calendarUrl) => {
     console.log(
       "fetchEvents called with calendarUrl:",
@@ -391,6 +474,14 @@ class KalendarApp extends Component {
     }
   };
 
+  /**
+   * fetchAllCalendarEvents — Fetches events from ALL selected calendars.
+   *
+   * Iterates over selectedCalendarIds, fetches each calendar's events via IPC,
+   * tags each event with its calendarUrl and calendarName (for color-coding),
+   * caches them in allCalendarEvents, and merges into a flat events array.
+   * Preserves any local-only or pending-sync events not yet confirmed by server.
+   */
   fetchAllCalendarEvents = async () => {
     console.log("Fetching events from all selected calendars");
     this.setState({ isLoading: true });
@@ -398,7 +489,7 @@ class KalendarApp extends Component {
     const allCalendarEvents = {};
     const allEvents = [];
 
-    // Fetch events from each selected calendar
+    // Fetch events from each selected calendar in sequence
     for (const calendarUrl of this.state.selectedCalendarIds) {
       const calendar = this.state.calendars.find(
         (cal) => cal.url === calendarUrl
@@ -439,6 +530,12 @@ class KalendarApp extends Component {
       };
     });
   };
+  /**
+   * handleCalendarToggle — Toggles a calendar's visibility in the multi-calendar view.
+   *
+   * Deselecting: immediately filters out that calendar's events from display.
+   * Selecting: uses cached events for instant display, or fetches from server if uncached.
+   */
   handleCalendarToggle = async (calendarUrl) => {
     const { selectedCalendarIds, allCalendarEvents } = this.state;
     let newSelectedIds;
@@ -512,6 +609,7 @@ class KalendarApp extends Component {
       }
     }
   };
+  // Opens the event creation modal when the user clicks/drags a time slot
   handleSelectSlot = ({ start, end }) => {
     // Get the first available event calendar as default
     const eventCalendars = this.state.calendars.filter(
@@ -533,6 +631,15 @@ class KalendarApp extends Component {
       },
     });
   };
+  /**
+   * handleCreateEvent — Creates a new event on the CalDAV server.
+   *
+   * Uses optimistic UI pattern:
+   * 1. Adds a temporary event to state immediately (instant visual feedback)
+   * 2. Sends create-event IPC to main process in background
+   * 3. On success: refreshes from server to get canonical event data
+   * 4. On failure: removes the temporary event and shows an error
+   */
   handleCreateEvent = async (e) => {
     e.preventDefault();
     console.log("Creating event, current state:", {
@@ -638,6 +745,7 @@ class KalendarApp extends Component {
       }));
     }
   };
+  // Shows context menu on event click; Alt+Click = quick delete shortcut
   handleContextMenu = (event, jsEvent) => {
     // Alt + Click = Quick delete
     if (jsEvent.altKey) {
@@ -659,6 +767,7 @@ class KalendarApp extends Component {
       },
     });
   };
+  // Handles drag-and-drop event rescheduling (optimistic update + server sync)
   handleEventDrop = async ({ event, start, end }) => {
     console.log("Event dropped:", event.title, "to", start);
 
@@ -694,6 +803,7 @@ class KalendarApp extends Component {
       this.fetchAllCalendarEvents();
     }
   };
+  // Handles event resize in week/day view (optimistic update + server sync)
   handleEventResize = async ({ event, start, end }) => {
     console.log("Event resized:", event.title, "from", event.start, "to", start, end);
 
@@ -740,6 +850,7 @@ class KalendarApp extends Component {
     });
   };
 
+  // Opens the event modal in edit mode, pre-filling fields from the existing event
   handleEditEvent = (event) => {
     this.setState({
       isEditMode: true,
@@ -754,6 +865,11 @@ class KalendarApp extends Component {
       showEventModal: true,
     });
   };
+  /**
+   * handleUpdateEvent — Saves changes to an existing event.
+   * Applies optimistic update to UI, then syncs to server.
+   * Reverts to server state on failure.
+   */
   handleUpdateEvent = async () => {
     const { editingEvent, newEvent } = this.state;
     if (!editingEvent) return;
@@ -818,6 +934,7 @@ class KalendarApp extends Component {
       this.fetchAllCalendarEvents();
     }
   };
+  // Deletes an event — removes from UI immediately, then deletes on server
   handleDeleteEvent = async (event) => {
     console.log("Deleting event:", event);
 
@@ -861,6 +978,12 @@ class KalendarApp extends Component {
   handleAddCalendar = () => {
     this.setState({ showCreateCalendarModal: true });
   };
+  /**
+   * handleCreateCalendar — Creates a new calendar on the Nextcloud server.
+   * Adds an optimistic placeholder immediately, then issues MKCALENDAR on server.
+   * On success: reconnects to fetch the real calendar object from the server.
+   * On failure: removes the placeholder and alerts the user.
+   */
   handleCreateCalendar = async (calendarName, calendarColor) => {
     console.log("Creating calendar:", calendarName, calendarColor);
 
@@ -1130,6 +1253,7 @@ class KalendarApp extends Component {
   // Task Management Handlers
   // ============================================
 
+  // Creates a new task list locally (TODO: sync via CalDAV VTODO)
   handleCreateList = (listName) => {
     const newList = {
       id: Date.now().toString(),
@@ -1147,6 +1271,7 @@ class KalendarApp extends Component {
     console.log("✓ Task list created:", newList);
   };
 
+  // Creates a new task within a list (TODO: sync via CalDAV VTODO)
   handleCreateTask = (listId, taskName) => {
     const newTask = {
       id: Date.now().toString(),
@@ -1165,6 +1290,7 @@ class KalendarApp extends Component {
     // TODO: Sync to CalDAV server using VTODO
     console.log("✓ Task created:", newTask, "in list:", listId);
   };
+  // Toggles task completion — also updates any matching calendar events
   handleToggleTask = (listId, taskId) => {
     // Find the task to determine the new completed state
     const list = this.state.taskLists.find((l) => l.id === listId);
@@ -1235,6 +1361,7 @@ class KalendarApp extends Component {
       showTaskManager: !prevState.showTaskManager,
     }));
   };
+  // Opens the event modal pre-filled with task data, allowing the user to schedule it
   handleTaskToCalendar = (task, listName) => {
     // Open event modal with task details pre-filled
     const now = new Date();
@@ -1242,6 +1369,12 @@ class KalendarApp extends Component {
     startTime.setHours(9, 0, 0, 0); // Default to 9 AM
     const endTime = new Date(startTime);
     endTime.setHours(10, 0, 0, 0); // Default to 1 hour duration
+
+    const targetCalUrl =
+          this.state.selectedCalendarIds[0] || this.state.calendarUrl;
+    const targetCal = this.state.calendars.find(
+      (cal) => cal.url === targetCalUrl
+    );
 
     this.setState({
       showEventModal: true,
@@ -1252,11 +1385,16 @@ class KalendarApp extends Component {
         end: endTime,
         description: `Task from list: ${listName}`,
         location: "",
-        calendarUrl:
-          this.state.selectedCalendarIds[0] || this.state.calendarUrl,
+        calendarUrl: targetCalUrl,
+        calendarName: targetCal?.displayName || "",
       },
     });
   };
+  /**
+   * handleTaskDroppedOnCalendar — Handles native drag-drop of a task onto the calendar.
+   * Creates an event at the drop time with the task's name and configured duration.
+   * Uses optimistic UI + background server sync via createEventFromTask().
+   */
   handleTaskDroppedOnCalendar = (dragData, slotInfo) => {
     console.log("Task dropped on calendar:", dragData, slotInfo);
 
@@ -1285,6 +1423,11 @@ class KalendarApp extends Component {
       return;
     }
 
+    // Find the calendar name for the target
+    const targetCalendar = this.state.calendars.find(
+      (cal) => cal.url === targetCalendarUrl
+    );
+
     // Create new event object
     const newEvent = {
       title: dragData.task.name,
@@ -1293,6 +1436,7 @@ class KalendarApp extends Component {
       description: `Task from list: ${dragData.listName || "Unknown"}`,
       location: "",
       calendarUrl: targetCalendarUrl,
+      calendarName: targetCalendar?.displayName || "",
     };
 
     console.log("Creating event from task:", newEvent);
@@ -1313,6 +1457,7 @@ class KalendarApp extends Component {
     // Create on server
     this.createEventFromTask(newEvent, tempId);
   };
+  // Server-side creation of an event from a dropped task (with retry/preserve on failure)
   createEventFromTask = async (eventData, tempId) => {
     try {
       // Validate eventData
@@ -1507,14 +1652,17 @@ class KalendarApp extends Component {
     this.setState({ currentDate: date });
   };
 
+  // Updates a single setting, applies it to the DOM, and persists (debounced)
   handleSettingChange = (key, value) => {
     const newSettings = { ...this.state.settings, [key]: value };
     this.setState({ settings: newSettings }, () => {
       this.applySettings();
-      ipcRenderer.invoke("save-settings", newSettings);
+      // Debounce saving to avoid frequent synchronous work in main process
+      this._debouncedSaveSettings(newSettings);
     });
   };
 
+  // Resets all settings to factory defaults and persists immediately
   handleResetSettings = () => {
     const defaults = {
       theme: "light",
@@ -1539,8 +1687,14 @@ class KalendarApp extends Component {
   // End Creative Feature Handlers
   // ============================================
 
+  /**
+   * formatDateTimeLocal — Converts a Date object to "YYYY-MM-DDTHH:MM" string
+   * for use as the value of <input type="datetime-local">.
+   * Returns empty string for invalid dates to prevent NaN in inputs.
+   */
   formatDateTimeLocal = (date) => {
     const d = new Date(date);
+    if (isNaN(d.getTime())) return "";
     const year = d.getFullYear();
     const month = String(d.getMonth() + 1).padStart(2, "0");
     const day = String(d.getDate()).padStart(2, "0");
@@ -1548,6 +1702,15 @@ class KalendarApp extends Component {
     const minutes = String(d.getMinutes()).padStart(2, "0");
     return `${year}-${month}-${day}T${hours}:${minutes}`;
   };
+  /**
+   * render — Renders either the login form or the full app layout.
+   * The app layout consists of:
+   *   - CalendarView (sidebar + calendar grid)
+   *   - ContextMenu (right-click event actions)
+   *   - EventModal (create/edit events)
+   *   - Settings, CreateCalendarModal, CalendarSettingsModal
+   *   - TaskModal (edit task details)
+   */
   render() {
     if (this.state.showLoginForm) {
       return h(LoginForm, {
@@ -1691,5 +1854,5 @@ class KalendarApp extends Component {
   }
 }
 
-// React 17 rendering
+// Bootstrap — Mount the KalendarApp component into the DOM (React 17 API)
 ReactDOM.render(h(KalendarApp), document.getElementById("app"));

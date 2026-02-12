@@ -1,4 +1,13 @@
-// Login Component
+// ============================================================================
+// LoginForm Component — LoginForm.js
+// ============================================================================
+// Full-screen login page for connecting to a Nextcloud/CalDAV server.
+// Collects server URL, username, password, and optional "Remember Me".
+// Displays a gradient background with the Kalendar branding.
+// On submit, delegates to the parent's onSubmit handler which triggers
+// the CalDAV connection flow via IPC.
+// ============================================================================
+
 class LoginForm extends React.Component {
   render() {
     const {

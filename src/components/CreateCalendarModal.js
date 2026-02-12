@@ -1,4 +1,11 @@
-// Create Calendar Modal Component
+// ============================================================================
+// CreateCalendarModal Component — CreateCalendarModal.js
+// ============================================================================
+// Simple modal for creating a new calendar on the Nextcloud server.
+// Collects a name and color (from a preset palette), then delegates
+// to the parent's onSubmit handler which calls the CalDAV MKCALENDAR API.
+// ============================================================================
+
 class CreateCalendarModal extends React.Component {
   constructor(props) {
     super(props);
