@@ -42,13 +42,15 @@ class NextEventCountdown extends React.Component {
     const { events } = this.props;
     if (!events || events.length === 0) return null;
     const now = this.state.now;
-    return events
-      .filter((e) => !e.isPreview)
-      .find((e) => {
-        const s = new Date(e.start);
-        const en = new Date(e.end);
-        return now >= s && now <= en;
-      }) || null;
+    return (
+      events
+        .filter((e) => !e.isPreview)
+        .find((e) => {
+          const s = new Date(e.start);
+          const en = new Date(e.end);
+          return now >= s && now <= en;
+        }) || null
+    );
   }
 
   /**
@@ -117,7 +119,7 @@ class NextEventCountdown extends React.Component {
     const isActive = !!active;
     const primaryStart = new Date(primaryEvent.start);
     const primaryEnd = new Date(primaryEvent.end);
-    const diff = isActive ? (primaryEnd - now) : (primaryStart - now);
+    const diff = isActive ? primaryEnd - now : primaryStart - now;
     const timeStr = this._formatDuration(diff);
     const urgency = isActive ? null : this._getUrgencyLevel(diff);
 
@@ -128,7 +130,9 @@ class NextEventCountdown extends React.Component {
     return h(
       "div",
       {
-        className: `next-event-wrapper${isHovered && upcoming.length > (isActive ? 0 : 1) ? " expanded" : ""}`,
+        className: `next-event-wrapper${
+          isHovered && upcoming.length > (isActive ? 0 : 1) ? " expanded" : ""
+        }`,
         onMouseEnter: this._handleMouseEnter,
         onMouseLeave: this._handleMouseLeave,
       },
@@ -140,20 +144,33 @@ class NextEventCountdown extends React.Component {
           className: wrapperClass,
           title: isActive
             ? `${primaryEvent.title} — ends in ${timeStr}`
-            : `${primaryEvent.title} at ${primaryStart.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}`,
+            : `${primaryEvent.title} at ${primaryStart.toLocaleTimeString(
+                "en-US",
+                { hour: "numeric", minute: "2-digit" }
+              )}`,
         },
-        (isActive || urgency === "critical") && h("span", { className: "next-event-pulse" }),
-        h("span", { className: "next-event-icon" },
-          isActive ? "🔴"
-            : urgency === "critical" ? "⚡"
-            : urgency === "high" ? "🔔"
+        (isActive || urgency === "critical") &&
+          h("span", { className: "next-event-pulse" }),
+        h(
+          "span",
+          { className: "next-event-icon" },
+          isActive
+            ? "🔴"
+            : urgency === "critical"
+            ? "⚡"
+            : urgency === "high"
+            ? "🔔"
             : "⏳"
         ),
         h(
           "div",
           { className: "next-event-info" },
           h("span", { className: "next-event-title" }, primaryEvent.title),
-          h("span", { className: "next-event-time" }, isActive ? `${timeStr} left` : `in ${timeStr}`)
+          h(
+            "span",
+            { className: "next-event-time" },
+            isActive ? `${timeStr} left` : `in ${timeStr}`
+          )
         ),
         // Show chevron hint if there are more events
         upcoming.length > (isActive ? 0 : 1) &&
@@ -169,7 +186,10 @@ class NextEventCountdown extends React.Component {
             const evStart = new Date(ev.start);
             const evDiff = evStart - now;
             const evTime = this._formatDuration(evDiff);
-            const evStartStr = evStart.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+            const evStartStr = evStart.toLocaleTimeString("en-US", {
+              hour: "numeric",
+              minute: "2-digit",
+            });
 
             return h(
               "div",
@@ -180,7 +200,11 @@ class NextEventCountdown extends React.Component {
               },
               h("span", { className: "next-event-dropdown-time" }, evStartStr),
               h("span", { className: "next-event-dropdown-title" }, ev.title),
-              h("span", { className: "next-event-dropdown-countdown" }, `in ${evTime}`)
+              h(
+                "span",
+                { className: "next-event-dropdown-countdown" },
+                `in ${evTime}`
+              )
             );
           }),
           upcoming.length > (isActive ? 6 : 7) &&

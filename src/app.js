@@ -94,7 +94,7 @@ class KalendarApp extends Component {
         x: 0,
         y: 0,
         event: null,
-      }, // Event Creation
+      },      // Event Creation
       newEvent: {
         title: "",
         start: new Date(),
@@ -102,58 +102,18 @@ class KalendarApp extends Component {
         description: "",
         location: "",
         calendarUrl: "", // Will be set to first calendar by default
-      }, // Editing Event
-      editingEvent: null,
+        recurrence: {
+          enabled: false,
+          days: [],
+          endDate: "",
+        },
+      },// Editing Event      editingEvent: null,
       isEditMode: false, // Tasks
-      taskLists: [
-        {
-          id: "1",
-          name: "Comp350",
-          tasks: [
-            {
-              id: "t1",
-              name: "homework1",
-              completed: false,
-              createdAt: new Date().toISOString(),
-            },
-            {
-              id: "t2",
-              name: "homework2",
-              completed: true,
-              createdAt: new Date().toISOString(),
-            },
-            {
-              id: "t3",
-              name: "project-draft",
-              completed: false,
-              createdAt: new Date().toISOString(),
-            },
-          ],
-          createdAt: new Date().toISOString(),
-        },
-        {
-          id: "2",
-          name: "Shopping",
-          tasks: [
-            {
-              id: "t4",
-              name: "Buy groceries",
-              completed: false,
-              createdAt: new Date().toISOString(),
-            },
-            {
-              id: "t5",
-              name: "Pick up package",
-              completed: false,
-              createdAt: new Date().toISOString(),
-            },
-          ],
-          createdAt: new Date().toISOString(),
-        },
-      ],
+      taskLists: [],
       showTaskManager: false,
       showTaskModal: false,
-      editingTaskListId: null,      editingTask: null, // Settings
+      editingTaskListId: null,
+      editingTask: null, // Settings
       settings: {
         theme: "light",
         primaryColor: "#5e72e4",
@@ -166,7 +126,7 @@ class KalendarApp extends Component {
         compactMode: false,
         animations: true,
         defaultTaskDuration: 15, // minutes
-      },      // Creative features
+      }, // Creative features
       currentView: "month",
     };
     // Debounced settings saver to avoid frequent IPC + disk writes
@@ -188,9 +148,7 @@ class KalendarApp extends Component {
   async componentDidMount() {
     // Global keyboard shortcuts (reserved for future use)
     this._handleKeyDown = (e) => {};
-    document.addEventListener("keydown", this._handleKeyDown);
-
-    // Load settings from main process (stored in userData/settings.json)
+    document.addEventListener("keydown", this._handleKeyDown); // Load settings from main process (stored in userData/settings.json)
     const result = await ipcRenderer.invoke("get-settings");
     if (result.success) {
       this.setState({ settings: result.settings }, () => {
@@ -220,6 +178,12 @@ class KalendarApp extends Component {
           }
         );
       }
+    }
+
+    // Load persisted task lists from disk (stored in userData/tasks.json)
+    const tasksResult = await ipcRenderer.invoke("get-tasks");
+    if (tasksResult.success && tasksResult.taskLists.length > 0) {
+      this.setState({ taskLists: tasksResult.taskLists });
     }
   }
 
@@ -275,12 +239,20 @@ class KalendarApp extends Component {
       },
     }));
   };
-
   handleEventDateChange = (fieldName, date) => {
     this.setState((prevState) => ({
       newEvent: {
         ...prevState.newEvent,
         [fieldName]: date,
+      },
+    }));
+  };
+
+  handleRecurrenceChange = (recurrence) => {
+    this.setState((prevState) => ({
+      newEvent: {
+        ...prevState.newEvent,
+        recurrence,
       },
     }));
   };
@@ -695,8 +667,7 @@ class KalendarApp extends Component {
 
       return {
         events: newEvents,
-        allCalendarEvents: newAllCalendarEvents,
-        isCreatingEvent: true,
+        allCalendarEvents: newAllCalendarEvents,        isCreatingEvent: true,
         showEventModal: false,
         newEvent: {
           title: "",
@@ -705,6 +676,7 @@ class KalendarApp extends Component {
           description: "",
           location: "",
           calendarUrl: "",
+          recurrence: { enabled: false, days: [], endDate: "" },
         },
       };
     });
@@ -773,10 +745,21 @@ class KalendarApp extends Component {
 
     // Update the event in state immediately for smooth UX (optimistic update)
     const updatedEvents = this.state.events.map((ev) =>
-      ev.id === event.id ? { ...ev, start: new Date(start), end: new Date(end) } : ev
+      ev.id === event.id
+        ? { ...ev, start: new Date(start), end: new Date(end) }
+        : ev
     );
     this.setState({ events: updatedEvents });
 
+    // Skip server sync for temp events that haven't been persisted yet
+    const isTempEvent =
+      (event.id && String(event.id).startsWith("temp-")) ||
+      event.tempId ||
+      event.pendingSync;
+    if (isTempEvent) {
+      console.log("Temp event moved locally — server sync skipped");
+      return;
+    }
     const calendarUrl = event.calendarUrl || this.state.calendarUrl;
 
     try {
@@ -805,13 +788,33 @@ class KalendarApp extends Component {
   };
   // Handles event resize in week/day view (optimistic update + server sync)
   handleEventResize = async ({ event, start, end }) => {
-    console.log("Event resized:", event.title, "from", event.start, "to", start, end);
+    console.log(
+      "Event resized:",
+      event.title,
+      "from",
+      event.start,
+      "to",
+      start,
+      end
+    );
 
     // Update the event in state immediately for smooth UX (optimistic update)
     const updatedEvents = this.state.events.map((ev) =>
-      ev.id === event.id ? { ...ev, start: new Date(start), end: new Date(end) } : ev
+      ev.id === event.id
+        ? { ...ev, start: new Date(start), end: new Date(end) }
+        : ev
     );
     this.setState({ events: updatedEvents });
+
+    // Skip server sync for temp events that haven't been persisted yet
+    const isTempEvent =
+      (event.id && String(event.id).startsWith("temp-")) ||
+      event.tempId ||
+      event.pendingSync;
+    if (isTempEvent) {
+      console.log("Temp event resized locally — server sync skipped");
+      return;
+    }
 
     const calendarUrl = event.calendarUrl || this.state.calendarUrl;
 
@@ -851,8 +854,7 @@ class KalendarApp extends Component {
   };
 
   // Opens the event modal in edit mode, pre-filling fields from the existing event
-  handleEditEvent = (event) => {
-    this.setState({
+  handleEditEvent = (event) => {    this.setState({
       isEditMode: true,
       editingEvent: event,
       newEvent: {
@@ -861,6 +863,11 @@ class KalendarApp extends Component {
         end: event.end,
         description: event.description || "",
         location: event.location || "",
+        recurrence: event.recurrence || {
+          enabled: false,
+          days: [],
+          endDate: "",
+        },
       },
       showEventModal: true,
     });
@@ -869,14 +876,17 @@ class KalendarApp extends Component {
    * handleUpdateEvent — Saves changes to an existing event.
    * Applies optimistic update to UI, then syncs to server.
    * Reverts to server state on failure.
-   */
-  handleUpdateEvent = async () => {
+   */ handleUpdateEvent = async () => {
     const { editingEvent, newEvent } = this.state;
     if (!editingEvent) return;
 
     console.log("Updating event:", editingEvent.id, "with:", newEvent);
 
     const calendarUrl = editingEvent.calendarUrl || this.state.calendarUrl;
+    const isTempEvent =
+      (editingEvent.id && String(editingEvent.id).startsWith("temp-")) ||
+      editingEvent.tempId ||
+      editingEvent.pendingSync;
 
     // Optimistic update — apply changes to UI immediately
     const updatedStart = new Date(newEvent.start);
@@ -893,33 +903,72 @@ class KalendarApp extends Component {
               location: newEvent.location,
             }
           : ev
-      ),
-      showEventModal: false,
+      ),      showEventModal: false,
       isEditMode: false,
-      editingEvent: null,
-      newEvent: {
+      editingEvent: null,      newEvent: {
         title: "",
         start: new Date(),
         end: new Date(),
         description: "",
         location: "",
+        recurrence: { enabled: false, days: [], endDate: "" },
       },
     }));
 
     try {
-      const result = await ipcRenderer.invoke("update-event", {
-        username: this.state.username,
-        password: this.state.password,
-        calendarUrl: calendarUrl,
-        eventId: editingEvent.id,
-        eventData: {
-          title: newEvent.title,
-          start: updatedStart.toISOString(),
-          end: updatedEnd.toISOString(),
-          description: newEvent.description || "",
-          location: newEvent.location || "",
-        },
-      });
+      let result;
+
+      if (isTempEvent) {
+        // Event hasn't been persisted to the server yet (e.g. task drop still syncing).
+        // Create it on the server with the edited data instead of trying to update.
+        console.log(
+          "Event is temporary — creating on server instead of updating"
+        );
+        result = await ipcRenderer.invoke("create-event", {
+          username: this.state.username,
+          password: this.state.password,
+          calendarUrl: calendarUrl,          eventData: {
+            title: newEvent.title,
+            start: updatedStart.toISOString(),
+            end: updatedEnd.toISOString(),
+            description: newEvent.description || "",
+            location: newEvent.location || "",
+            recurrence: newEvent.recurrence || null,
+          },
+        });
+
+        if (result.success) {
+          console.log("✅ Temp event created on server successfully!");
+          // Replace the temp event with the real server ID
+          const realId = result.eventId || editingEvent.id;
+          this.setState((prevState) => ({
+            events: prevState.events.map((ev) =>
+              ev.id === editingEvent.id
+                ? {
+                    ...ev,
+                    id: realId,
+                    tempId: undefined,
+                    pendingSync: undefined,
+                  }
+                : ev
+            ),
+          }));
+        }
+      } else {        result = await ipcRenderer.invoke("update-event", {
+          username: this.state.username,
+          password: this.state.password,
+          calendarUrl: calendarUrl,
+          eventId: editingEvent.id,
+          eventData: {
+            title: newEvent.title,
+            start: updatedStart.toISOString(),
+            end: updatedEnd.toISOString(),
+            description: newEvent.description || "",
+            location: newEvent.location || "",
+            recurrence: newEvent.recurrence || null,
+          },
+        });
+      }
 
       if (result.success) {
         console.log("✅ Event updated successfully!");
@@ -954,7 +1003,16 @@ class KalendarApp extends Component {
         events: newEvents,
         allCalendarEvents: newAllCalendarEvents,
       };
-    });
+    }); // Skip server deletion for temporary events that haven't been persisted yet
+    const isTempEvent =
+      (event.id && String(event.id).startsWith("temp-")) ||
+      event.tempId ||
+      event.pendingSync;
+
+    if (isTempEvent) {
+      console.log("✅ Temp event removed locally (not yet on server)");
+      return;
+    }
 
     // Then delete from server
     const result = await ipcRenderer.invoke("delete-event", {
@@ -1248,10 +1306,16 @@ class KalendarApp extends Component {
       // Keep serverUrl pre-filled for convenience
     });
   };
-
   // ============================================
   // Task Management Handlers
   // ============================================
+
+  /** Persists the current taskLists state to disk via IPC. */
+  _persistTasks = () => {
+    ipcRenderer.invoke("save-tasks", this.state.taskLists).then((res) => {
+      if (!res.success) console.error("Failed to persist tasks:", res.error);
+    });
+  };
 
   // Creates a new task list locally (TODO: sync via CalDAV VTODO)
   handleCreateList = (listName) => {
@@ -1260,12 +1324,13 @@ class KalendarApp extends Component {
       name: listName,
       tasks: [],
       createdAt: new Date().toISOString(),
-    };
-
-    // Optimistic update
-    this.setState((prevState) => ({
-      taskLists: [...prevState.taskLists, newList],
-    }));
+    }; // Optimistic update
+    this.setState(
+      (prevState) => ({
+        taskLists: [...prevState.taskLists, newList],
+      }),
+      this._persistTasks
+    );
 
     // TODO: Sync to CalDAV server using VTODO
     console.log("✓ Task list created:", newList);
@@ -1278,14 +1343,17 @@ class KalendarApp extends Component {
       name: taskName,
       completed: false,
       createdAt: new Date().toISOString(),
-    };
-
-    // Optimistic update
-    this.setState((prevState) => ({
-      taskLists: prevState.taskLists.map((list) =>
-        list.id === listId ? { ...list, tasks: [...list.tasks, newTask] } : list
-      ),
-    }));
+    }; // Optimistic update
+    this.setState(
+      (prevState) => ({
+        taskLists: prevState.taskLists.map((list) =>
+          list.id === listId
+            ? { ...list, tasks: [...list.tasks, newTask] }
+            : list
+        ),
+      }),
+      this._persistTasks
+    );
 
     // TODO: Sync to CalDAV server using VTODO
     console.log("✓ Task created:", newTask, "in list:", listId);
@@ -1298,61 +1366,68 @@ class KalendarApp extends Component {
     if (!task) return;
 
     const newCompleted = !task.completed;
-    const taskName = task.name;
-
-    // Single setState to update both taskLists and matching calendar events
+    const taskName = task.name; // Single setState to update both taskLists and matching calendar events
     // atomically, preventing intermediate re-renders that cause visual shifts
-    this.setState((prevState) => ({
-      taskLists: prevState.taskLists.map((l) =>
-        l.id === listId
-          ? {
-              ...l,
-              tasks: l.tasks.map((t) =>
-                t.id === taskId
-                  ? { ...t, completed: newCompleted }
-                  : t
-              ),
-            }
-          : l
-      ),
-      events: prevState.events.map((ev) => {
-        const isMatch =
-          ev.title === taskName &&
-          (ev.title === taskName ||
-            (ev.description && ev.description.includes("Task from list:")));
-        if (isMatch) {
-          return { ...ev, completed: newCompleted };
-        }
-        return ev;
+    this.setState(
+      (prevState) => ({
+        taskLists: prevState.taskLists.map((l) =>
+          l.id === listId
+            ? {
+                ...l,
+                tasks: l.tasks.map((t) =>
+                  t.id === taskId ? { ...t, completed: newCompleted } : t
+                ),
+              }
+            : l
+        ),
+        events: prevState.events.map((ev) => {
+          const isMatch =
+            ev.title === taskName &&
+            (ev.title === taskName ||
+              (ev.description && ev.description.includes("Task from list:")));
+          if (isMatch) {
+            return { ...ev, completed: newCompleted };
+          }
+          return ev;
+        }),
       }),
-    }));
+      this._persistTasks
+    );
 
-    console.log("✓ Task toggled:", taskId, "in list:", listId, "→", newCompleted ? "completed" : "active");
+    console.log(
+      "✓ Task toggled:",
+      taskId,
+      "in list:",
+      listId,
+      "→",
+      newCompleted ? "completed" : "active"
+    );
   };
 
   handleDeleteTask = (listId, taskId) => {
     // Find the task name before deleting so we can also remove matching calendar events
     const list = this.state.taskLists.find((l) => l.id === listId);
     const task = list?.tasks.find((t) => t.id === taskId);
-    const taskName = task?.name;
-
-    // Atomically remove the task and any matching calendar events
-    this.setState((prevState) => ({
-      taskLists: prevState.taskLists.map((l) =>
-        l.id === listId
-          ? { ...l, tasks: l.tasks.filter((t) => t.id !== taskId) }
-          : l
-      ),
-      events: taskName
-        ? prevState.events.filter((ev) => {
-            const isTaskEvent =
-              ev.title === taskName &&
-              ev.description &&
-              ev.description.includes("Task from list:");
-            return !isTaskEvent;
-          })
-        : prevState.events,
-    }));
+    const taskName = task?.name; // Atomically remove the task and any matching calendar events
+    this.setState(
+      (prevState) => ({
+        taskLists: prevState.taskLists.map((l) =>
+          l.id === listId
+            ? { ...l, tasks: l.tasks.filter((t) => t.id !== taskId) }
+            : l
+        ),
+        events: taskName
+          ? prevState.events.filter((ev) => {
+              const isTaskEvent =
+                ev.title === taskName &&
+                ev.description &&
+                ev.description.includes("Task from list:");
+              return !isTaskEvent;
+            })
+          : prevState.events,
+      }),
+      this._persistTasks
+    );
 
     console.log("✓ Task deleted:", taskId, "from list:", listId);
   };
@@ -1360,24 +1435,31 @@ class KalendarApp extends Component {
   handleDeleteList = (listId) => {
     // Collect all task names in this list so we can remove their calendar events
     const list = this.state.taskLists.find((l) => l.id === listId);
-    const taskNames = list?.tasks ? list.tasks.map((t) => t.name) : [];
+    const taskNames = list?.tasks ? list.tasks.map((t) => t.name) : []; // Atomically remove the list and all matching calendar events
+    this.setState(
+      (prevState) => ({
+        taskLists: prevState.taskLists.filter((l) => l.id !== listId),
+        events:
+          taskNames.length > 0
+            ? prevState.events.filter((ev) => {
+                const isTaskEvent =
+                  taskNames.includes(ev.title) &&
+                  ev.description &&
+                  ev.description.includes("Task from list:");
+                return !isTaskEvent;
+              })
+            : prevState.events,
+      }),
+      this._persistTasks
+    );
 
-    // Atomically remove the list and all matching calendar events
-    this.setState((prevState) => ({
-      taskLists: prevState.taskLists.filter((l) => l.id !== listId),
-      events:
-        taskNames.length > 0
-          ? prevState.events.filter((ev) => {
-              const isTaskEvent =
-                taskNames.includes(ev.title) &&
-                ev.description &&
-                ev.description.includes("Task from list:");
-              return !isTaskEvent;
-            })
-          : prevState.events,
-    }));
-
-    console.log("✓ Task list deleted:", listId, "with", taskNames.length, "tasks");
+    console.log(
+      "✓ Task list deleted:",
+      listId,
+      "with",
+      taskNames.length,
+      "tasks"
+    );
   };
   handleToggleTaskManager = () => {
     this.setState((prevState) => ({
@@ -1394,7 +1476,7 @@ class KalendarApp extends Component {
     endTime.setHours(10, 0, 0, 0); // Default to 1 hour duration
 
     const targetCalUrl =
-          this.state.selectedCalendarIds[0] || this.state.calendarUrl;
+      this.state.selectedCalendarIds[0] || this.state.calendarUrl;
     const targetCal = this.state.calendars.find(
       (cal) => cal.url === targetCalUrl
     );
@@ -1619,27 +1701,29 @@ class KalendarApp extends Component {
       });
     }
   };
-
   handleTaskModalSubmit = (taskData) => {
     const { editingTaskListId, editingTask } = this.state;
 
     if (editingTask) {
       // Update existing task
-      this.setState((prevState) => ({
-        taskLists: prevState.taskLists.map((list) =>
-          list.id === editingTaskListId
-            ? {
-                ...list,
-                tasks: list.tasks.map((task) =>
-                  task.id === editingTask.id ? { ...task, ...taskData } : task
-                ),
-              }
-            : list
-        ),
-        showTaskModal: false,
-        editingTaskListId: null,
-        editingTask: null,
-      }));
+      this.setState(
+        (prevState) => ({
+          taskLists: prevState.taskLists.map((list) =>
+            list.id === editingTaskListId
+              ? {
+                  ...list,
+                  tasks: list.tasks.map((task) =>
+                    task.id === editingTask.id ? { ...task, ...taskData } : task
+                  ),
+                }
+              : list
+          ),
+          showTaskModal: false,
+          editingTaskListId: null,
+          editingTask: null,
+        }),
+        this._persistTasks
+      );
     }
   };
 
@@ -1741,7 +1825,7 @@ class KalendarApp extends Component {
         isLoading: this.state.isLoading,
         errorMessage: this.state.errorMessage,
       });
-    }    // The root div is now the CalendarView itself, no extra div needed
+    } // The root div is now the CalendarView itself, no extra div needed
     return h(
       "div",
       { className: "kalendar-app-wrapper" },
@@ -1779,7 +1863,8 @@ class KalendarApp extends Component {
         onDeleteList: this.handleDeleteList,
         onToggleTask: this.handleToggleTask,
         onTaskToCalendar: this.handleTaskToCalendar,
-        onTaskClick: this.handleTaskClick,        onTaskDroppedOnCalendar: this.handleTaskDroppedOnCalendar,
+        onTaskClick: this.handleTaskClick,
+        onTaskDroppedOnCalendar: this.handleTaskDroppedOnCalendar,
         onViewChange: this.handleChangeView,
       }),
 
@@ -1810,9 +1895,9 @@ class KalendarApp extends Component {
           },
           onSubmit: this.state.isEditMode
             ? this.handleUpdateEvent
-            : this.handleCreateEvent,
-          onInputChange: this.handleEventInputChange, // <-- Pass the new handler here
+            : this.handleCreateEvent,          onInputChange: this.handleEventInputChange, // <-- Pass the new handler here
           onDateChange: this.handleEventDateChange,
+          onRecurrenceChange: this.handleRecurrenceChange,
           onClose: () =>
             this.setState({
               showEventModal: false,
@@ -1825,6 +1910,7 @@ class KalendarApp extends Component {
                 description: "",
                 location: "",
                 calendarUrl: "",
+                recurrence: { enabled: false, days: [], endDate: "" },
               },
             }),
           formatDateTimeLocal: this.formatDateTimeLocal,
@@ -1871,7 +1957,9 @@ class KalendarApp extends Component {
             this.setState({
               showTaskModal: false,
               editingTaskListId: null,
-              editingTask: null,            }),        })
+              editingTask: null,
+            }),
+        })
     );
   }
 }

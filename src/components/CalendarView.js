@@ -17,13 +17,13 @@ class CalendarView extends React.Component {
     // Use the base Calendar component from the CDN-loaded ReactBigCalendar
     this.CalendarComponent = ReactBigCalendar.Calendar;
     this.state = {
-      isDraggingOver: false,   // True while a task is being dragged over the calendar
-      previewEvent: null,      // Temporary event shown at the drop position
+      isDraggingOver: false, // True while a task is being dragged over the calendar
+      previewEvent: null, // Temporary event shown at the drop position
     };
-    this._draggedTask = null;    // Currently dragged task data (kept outside state to avoid re-renders)
-    this._rafId = null;          // requestAnimationFrame ID for smooth drag-over updates
+    this._draggedTask = null; // Currently dragged task data (kept outside state to avoid re-renders)
+    this._rafId = null; // requestAnimationFrame ID for smooth drag-over updates
     this._lastPreviewTime = null; // Prevents redundant setState when preview time hasn't changed
-    this._dropHandled = false;   // Prevents handleGlobalDragEnd from clearing after a successful drop
+    this._dropHandled = false; // Prevents handleGlobalDragEnd from clearing after a successful drop
   }
   /**
    * componentDidMount — Sets up native event listeners for drag-and-drop.
@@ -373,7 +373,7 @@ class CalendarView extends React.Component {
           textDecoration: "line-through",
           filter: "grayscale(40%)",
           boxShadow: calColor ? `inset 5px 0 0 0 ${calColor}` : undefined,
-          paddingLeft: calColor ? '12px' : undefined,
+          paddingLeft: calColor ? "12px" : undefined,
         },
       };
     }
@@ -404,14 +404,12 @@ class CalendarView extends React.Component {
       timeBg = "linear-gradient(135deg, #4facfe 0%, #00f2fe 100%)";
     }
 
-    const style = timeBg
-      ? { background: timeBg, color: "white" }
-      : {};
+    const style = timeBg ? { background: timeBg, color: "white" } : {};
 
     // Add calendar color left border strip via box-shadow
     if (calColor) {
       style.boxShadow = `inset 5px 0 0 0 ${calColor}, 0 1px 3px rgba(0,0,0,0.1)`;
-      style.paddingLeft = '12px';
+      style.paddingLeft = "12px";
     }
 
     return {
@@ -844,7 +842,8 @@ class CalendarView extends React.Component {
         // Header
         h(
           "div",
-          { className: "app-header" },          h(
+          { className: "app-header" },
+          h(
             "div",
             { className: "header-left" },
             h(
@@ -858,7 +857,7 @@ class CalendarView extends React.Component {
           ),
           h(
             "div",
-            { className: "header-controls" },            // Action Buttons
+            { className: "header-controls" }, // Action Buttons
             h(
               "div",
               { className: "action-buttons" },
@@ -936,7 +935,8 @@ class CalendarView extends React.Component {
           },
           h(
             "div",
-            { className: "calendar-container" },            h(CalendarComponent, {
+            { className: "calendar-container" },
+            h(CalendarComponent, {
               localizer: localizer,
               events: displayEvents,
               startAccessor: "start",
@@ -995,7 +995,9 @@ class CalendarView extends React.Component {
     if (event.calendarName) {
       // Check if any calendar matches by displayName
       if (this.props.calendars) {
-        const cal = this.props.calendars.find((c) => c.displayName === event.calendarName);
+        const cal = this.props.calendars.find(
+          (c) => c.displayName === event.calendarName
+        );
         if (cal) {
           return cal.color || this.getCalendarColor(cal.displayName);
         }

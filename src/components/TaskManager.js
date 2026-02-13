@@ -95,9 +95,11 @@ class TaskManager extends React.Component {
     if (!confirmDelete) return;
 
     if (confirmDelete.type === "list") {
-      if (this.props.onDeleteList) this.props.onDeleteList(confirmDelete.listId);
+      if (this.props.onDeleteList)
+        this.props.onDeleteList(confirmDelete.listId);
     } else if (confirmDelete.type === "task") {
-      if (this.props.onDeleteTask) this.props.onDeleteTask(confirmDelete.listId, confirmDelete.taskId);
+      if (this.props.onDeleteTask)
+        this.props.onDeleteTask(confirmDelete.listId, confirmDelete.taskId);
     }
     this.setState({ confirmDelete: null });
   };
@@ -152,8 +154,14 @@ class TaskManager extends React.Component {
 
   getListColor(listName) {
     const colors = [
-      "#5e72e4", "#11cdef", "#2dce89", "#fb6340",
-      "#f5365c", "#ffd600", "#172b4d", "#8965e0",
+      "#5e72e4",
+      "#11cdef",
+      "#2dce89",
+      "#fb6340",
+      "#f5365c",
+      "#ffd600",
+      "#172b4d",
+      "#8965e0",
     ];
     const index = listName
       .split("")
@@ -191,23 +199,30 @@ class TaskManager extends React.Component {
           },
           "+"
         )
-      ),
-
-      // New List Form
+      ), // New List Form
       showNewListForm &&
         h(
           "div",
-          { className: "new-task-inline-form" },
+          {
+            className: "new-task-inline-form",
+            onMouseDown: (e) => e.stopPropagation(),
+            onClick: (e) => e.stopPropagation(),
+          },
           h("input", {
             type: "text",
             placeholder: "New list name...",
             value: newListName,
             onChange: (e) => this.setState({ newListName: e.target.value }),
-            onKeyPress: (e) => {
+            onKeyDown: (e) => {
+              e.stopPropagation();
               if (e.key === "Enter") this.handleCreateList();
             },
+            onMouseDown: (e) => e.stopPropagation(),
             autoFocus: true,
             className: "inline-input",
+            ref: (el) => {
+              if (el) setTimeout(() => el.focus(), 0);
+            },
           }),
           h(
             "div",
@@ -308,18 +323,28 @@ class TaskManager extends React.Component {
                   showNewTaskForm[list.id] &&
                     h(
                       "div",
-                      { key: "form", className: "new-task-inline-form" },
+                      {
+                        key: "form",
+                        className: "new-task-inline-form",
+                        onMouseDown: (e) => e.stopPropagation(),
+                        onClick: (e) => e.stopPropagation(),
+                      },
                       h("input", {
                         type: "text",
                         placeholder: "New task...",
                         value: newTaskName,
                         onChange: (e) =>
                           this.setState({ newTaskName: e.target.value }),
-                        onKeyPress: (e) => {
+                        onKeyDown: (e) => {
+                          e.stopPropagation();
                           if (e.key === "Enter") this.handleCreateTask(list.id);
                         },
+                        onMouseDown: (e) => e.stopPropagation(),
                         autoFocus: true,
                         className: "inline-input",
+                        ref: (el) => {
+                          if (el) setTimeout(() => el.focus(), 0);
+                        },
                       }),
                       h(
                         "div",
@@ -363,7 +388,9 @@ class TaskManager extends React.Component {
                               className: `sidebar-task-item ${
                                 task.completed ? "completed" : ""
                               }`,
-                              style: { '--list-color': this.getListColor(list.name) },
+                              style: {
+                                "--list-color": this.getListColor(list.name),
+                              },
                               draggable: true,
                               onDragStart: (e) =>
                                 this.handleDragStart(e, task, list),
@@ -468,7 +495,11 @@ class TaskManager extends React.Component {
               "div",
               { className: "task-confirm-message" },
               this.state.confirmDelete.type === "list"
-                ? `"${this.state.confirmDelete.name}" and ${this.state.confirmDelete.taskCount === 1 ? "its 1 task" : "all " + this.state.confirmDelete.taskCount + " tasks"} will be permanently deleted.`
+                ? `"${this.state.confirmDelete.name}" and ${
+                    this.state.confirmDelete.taskCount === 1
+                      ? "its 1 task"
+                      : "all " + this.state.confirmDelete.taskCount + " tasks"
+                  } will be permanently deleted.`
                 : `"${this.state.confirmDelete.name}" will be permanently deleted.`
             ),
             h(

@@ -35,7 +35,7 @@ const { URL } = require("url");
 class CalDAVService {
   constructor() {
     this.credentials = null; // Cached credentials from last successful connect()
-    this.serverUrl = null;   // Cached server URL
+    this.serverUrl = null; // Cached server URL
   }
 
   /**
@@ -326,10 +326,24 @@ class CalDAVService {
 
                   const jcalData = ICAL.parse(calendarData);
                   const comp = new ICAL.Component(jcalData);
-                  const vevent = comp.getFirstSubcomponent("vevent");
-
-                  if (vevent) {
+                  const vevent = comp.getFirstSubcomponent("vevent");                  if (vevent) {
                     const event = new ICAL.Event(vevent);
+
+                    // Parse recurrence rule if present
+                    let recurrence = { enabled: false, days: [], endDate: "" };
+                    const rruleProp = vevent.getFirstProperty("rrule");
+                    if (rruleProp) {
+                      const rrule = rruleProp.getFirstValue();
+                      if (rrule && rrule.freq === "WEEKLY" && rrule.parts && rrule.parts.BYDAY) {
+                        recurrence.enabled = true;
+                        recurrence.days = rrule.parts.BYDAY.map(String);
+                        if (rrule.until) {
+                          const untilDate = rrule.until.toJSDate();
+                          recurrence.endDate = untilDate.toISOString().split("T")[0];
+                        }
+                      }
+                    }
+
                     const parsedEvent = {
                       id: event.uid,
                       title: event.summary || "Untitled Event",
@@ -337,9 +351,53 @@ class CalDAVService {
                       end: event.endDate.toJSDate(),
                       description: event.description || "",
                       location: event.location || "",
+                      recurrence: recurrence,
                     };
                     console.log("✅ Parsed event:", parsedEvent);
                     events.push(parsedEvent);
+
+                    // Expand recurring events into individual occurrences
+                    if (recurrence.enabled && rruleProp) {
+                      try {
+                        const expand = new ICAL.RecurExpansion({
+                          component: vevent,
+                          dtstart: event.startDate,
+                        });
+
+                        const duration = event.endDate.toJSDate().getTime() - event.startDate.toJSDate().getTime();
+                        // Expand up to 1 year from now, max 365 occurrences
+                        const expandLimit = new Date();
+                        expandLimit.setFullYear(expandLimit.getFullYear() + 1);
+                        let count = 0;
+                        const maxOccurrences = 365;
+
+                        // Skip the first occurrence (already added above)
+                        expand.next();
+
+                        while (count < maxOccurrences) {
+                          const nextDate = expand.next();
+                          if (!nextDate) break;
+                          const occurrenceStart = nextDate.toJSDate();
+                          if (occurrenceStart > expandLimit) break;
+
+                          events.push({
+                            id: event.uid + "-" + occurrenceStart.toISOString(),
+                            title: event.summary || "Untitled Event",
+                            start: occurrenceStart,
+                            end: new Date(occurrenceStart.getTime() + duration),
+                            description: event.description || "",
+                            location: event.location || "",
+                            recurrence: recurrence,
+                            isRecurrenceInstance: true,
+                            masterEventId: event.uid,
+                          });
+                          count++;
+                        }
+                        console.log(`🔁 Expanded ${count} recurring occurrences for "${event.summary}"`);
+                      } catch (expandError) {
+                        console.error("❌ Error expanding recurrence:", expandError);
+                      }
+                    }
                   }
                 }
               } catch (parseError) {
@@ -415,13 +473,28 @@ class CalDAVService {
 
       // Use false for timezone to create floating time (local time)
       event.startDate = ICAL.Time.fromJSDate(startDate, false);
-      event.endDate = ICAL.Time.fromJSDate(endDate, false);
-
-      if (eventData.description) {
+      event.endDate = ICAL.Time.fromJSDate(endDate, false);      if (eventData.description) {
         event.description = eventData.description;
       }
       if (eventData.location) {
         event.location = eventData.location;
+      }
+
+      // Add recurrence rule if enabled
+      if (
+        eventData.recurrence &&
+        eventData.recurrence.enabled &&
+        eventData.recurrence.days &&
+        eventData.recurrence.days.length > 0
+      ) {
+        let rruleValue = "FREQ=WEEKLY;BYDAY=" + eventData.recurrence.days.join(",");
+        if (eventData.recurrence.endDate) {
+          // Convert end date to RRULE UNTIL format (YYYYMMDD)
+          const untilDate = eventData.recurrence.endDate.replace(/-/g, "") + "T235959Z";
+          rruleValue += ";UNTIL=" + untilDate;
+        }
+        vevent.addPropertyWithValue("rrule", ICAL.Recur.fromString(rruleValue));
+        console.log("Added RRULE:", rruleValue);
       }
 
       event.uid = `${Date.now()}@kalendar-app`;
@@ -631,12 +704,34 @@ class CalDAVService {
       }
       if (eventData.title !== undefined) {
         event.summary = eventData.title;
-      }
-      if (eventData.description !== undefined) {
+      }      if (eventData.description !== undefined) {
         event.description = eventData.description;
       }
       if (eventData.location !== undefined) {
         event.location = eventData.location;
+      }
+
+      // Update recurrence rule
+      if (eventData.recurrence !== undefined) {
+        // Remove existing RRULE if present
+        vevent.removeAllProperties("rrule");
+
+        if (
+          eventData.recurrence &&
+          eventData.recurrence.enabled &&
+          eventData.recurrence.days &&
+          eventData.recurrence.days.length > 0
+        ) {
+          let rruleValue = "FREQ=WEEKLY;BYDAY=" + eventData.recurrence.days.join(",");
+          if (eventData.recurrence.endDate) {
+            const untilDate = eventData.recurrence.endDate.replace(/-/g, "") + "T235959Z";
+            rruleValue += ";UNTIL=" + untilDate;
+          }
+          vevent.addPropertyWithValue("rrule", ICAL.Recur.fromString(rruleValue));
+          console.log("Updated RRULE:", rruleValue);
+        } else {
+          console.log("Removed RRULE (recurrence disabled)");
+        }
       }
 
       const updatedCalendarData = comp.toString();

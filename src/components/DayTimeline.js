@@ -60,7 +60,9 @@ class DayTimeline extends React.Component {
     const m = d.getMinutes();
     const ampm = h >= 12 ? "p" : "a";
     const hr = h % 12 || 12;
-    return m === 0 ? `${hr}${ampm}` : `${hr}:${String(m).padStart(2, "0")}${ampm}`;
+    return m === 0
+      ? `${hr}${ampm}`
+      : `${hr}:${String(m).padStart(2, "0")}${ampm}`;
   }
 
   _getCurrentHourPercent() {
@@ -77,7 +79,11 @@ class DayTimeline extends React.Component {
 
     const dayLabel = isToday
       ? "Today"
-      : target.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
+      : target.toLocaleDateString("en-US", {
+          weekday: "short",
+          month: "short",
+          day: "numeric",
+        });
 
     if (todayEvents.length === 0) {
       return h(
@@ -116,7 +122,11 @@ class DayTimeline extends React.Component {
         "div",
         { className: "day-timeline-header" },
         h("span", { className: "day-timeline-title" }, dayLabel),
-        h("span", { className: "day-timeline-count" }, `${todayEvents.length} event${todayEvents.length !== 1 ? "s" : ""}`)
+        h(
+          "span",
+          { className: "day-timeline-count" },
+          `${todayEvents.length} event${todayEvents.length !== 1 ? "s" : ""}`
+        )
       ),
       h(
         "div",
@@ -125,8 +135,15 @@ class DayTimeline extends React.Component {
         Array.from({ length: endHour - startHour + 1 }, (_, i) => {
           const hour = startHour + i;
           if (hour > endHour) return null;
-          const pct = ((hour - startHour) * 60 / totalMinutes) * 100;
-          const label = hour === 0 ? "12a" : hour < 12 ? `${hour}a` : hour === 12 ? "12p" : `${hour - 12}p`;
+          const pct = (((hour - startHour) * 60) / totalMinutes) * 100;
+          const label =
+            hour === 0
+              ? "12a"
+              : hour < 12
+              ? `${hour}a`
+              : hour === 12
+              ? "12p"
+              : `${hour - 12}p`;
           return h(
             "div",
             {
@@ -134,7 +151,9 @@ class DayTimeline extends React.Component {
               className: "day-timeline-hour-mark",
               style: { left: `${pct}%` },
             },
-            i % 2 === 0 ? h("span", { className: "day-timeline-hour-label" }, label) : null
+            i % 2 === 0
+              ? h("span", { className: "day-timeline-hour-label" }, label)
+              : null
           );
         }),
         // Now indicator
@@ -170,7 +189,9 @@ class DayTimeline extends React.Component {
               width: `${Math.min(width, 100 - left)}%`,
               backgroundColor: color,
             },
-            title: `${ev.title}\n${this._formatTime(evStart)} – ${this._formatTime(evEnd)}`,
+            title: `${ev.title}\n${this._formatTime(
+              evStart
+            )} – ${this._formatTime(evEnd)}`,
           });
         })
       ),
@@ -182,7 +203,8 @@ class DayTimeline extends React.Component {
           const evStart = new Date(ev.start);
           const color = this._getTimeColor(evStart.getHours());
           const now = new Date();
-          const isActive = isToday && now >= new Date(ev.start) && now <= new Date(ev.end);
+          const isActive =
+            isToday && now >= new Date(ev.start) && now <= new Date(ev.end);
 
           return h(
             "div",
@@ -197,13 +219,21 @@ class DayTimeline extends React.Component {
             h(
               "div",
               { className: "day-timeline-list-text" },
-              h("span", { className: "day-timeline-list-time" }, this._formatTime(evStart)),
+              h(
+                "span",
+                { className: "day-timeline-list-time" },
+                this._formatTime(evStart)
+              ),
               h("span", { className: "day-timeline-list-title" }, ev.title)
             )
           );
         }),
         todayEvents.length > 4 &&
-          h("div", { className: "day-timeline-more" }, `+${todayEvents.length - 4} more`)
+          h(
+            "div",
+            { className: "day-timeline-more" },
+            `+${todayEvents.length - 4} more`
+          )
       )
     );
   }

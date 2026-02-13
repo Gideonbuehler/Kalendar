@@ -25,7 +25,10 @@ class EventInsights extends React.Component {
 
   _dateKey(date) {
     const d = new Date(date);
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(
+      2,
+      "0"
+    )}-${String(d.getDate()).padStart(2, "0")}`;
   }
 
   _getInsights() {
@@ -38,7 +41,15 @@ class EventInsights extends React.Component {
 
     // === 1. Busiest day of the week ===
     const dayCounts = [0, 0, 0, 0, 0, 0, 0]; // Sun-Sat
-    const dayNames = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+    const dayNames = [
+      "Sunday",
+      "Monday",
+      "Tuesday",
+      "Wednesday",
+      "Thursday",
+      "Friday",
+      "Saturday",
+    ];
     realEvents.forEach((e) => {
       const d = new Date(e.start);
       dayCounts[d.getDay()]++;
@@ -59,11 +70,15 @@ class EventInsights extends React.Component {
       const t = e.title.trim().toLowerCase();
       titleCounts[t] = (titleCounts[t] || 0) + 1;
     });
-    const sortedTitles = Object.entries(titleCounts).sort((a, b) => b[1] - a[1]);
+    const sortedTitles = Object.entries(titleCounts).sort(
+      (a, b) => b[1] - a[1]
+    );
     if (sortedTitles.length > 0 && sortedTitles[0][1] > 1) {
       const [title, count] = sortedTitles[0];
       // Find original casing
-      const original = realEvents.find((e) => e.title.trim().toLowerCase() === title);
+      const original = realEvents.find(
+        (e) => e.title.trim().toLowerCase() === title
+      );
       insights.push({
         icon: "🔁",
         text: `"${original ? original.title : title}" repeats`,
@@ -78,8 +93,11 @@ class EventInsights extends React.Component {
     const recentEvents = realEvents.filter(
       (e) => new Date(e.start) >= twoWeeksAgo && new Date(e.start) <= now
     );
-    const uniqueDays = new Set(recentEvents.map((e) => this._dateKey(new Date(e.start))));
-    const avgPerDay = uniqueDays.size > 0 ? (recentEvents.length / 14).toFixed(1) : 0;
+    const uniqueDays = new Set(
+      recentEvents.map((e) => this._dateKey(new Date(e.start)))
+    );
+    const avgPerDay =
+      uniqueDays.size > 0 ? (recentEvents.length / 14).toFixed(1) : 0;
     if (recentEvents.length > 0) {
       insights.push({
         icon: "📈",

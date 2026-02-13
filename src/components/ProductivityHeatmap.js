@@ -36,7 +36,11 @@ class ProductivityHeatmap extends React.Component {
     const { events, taskLists } = this.props;
 
     // Return cached result if inputs haven't changed
-    if (this._cachedEvents === events && this._cachedTaskLists === taskLists && this._cachedActivityMap) {
+    if (
+      this._cachedEvents === events &&
+      this._cachedTaskLists === taskLists &&
+      this._cachedActivityMap
+    ) {
       return this._cachedActivityMap;
     }
 
@@ -58,7 +62,9 @@ class ProductivityHeatmap extends React.Component {
         if (list.tasks) {
           list.tasks.forEach((task) => {
             if (task.completed) {
-              const date = new Date(task.completedAt || task.createdAt || new Date());
+              const date = new Date(
+                task.completedAt || task.createdAt || new Date()
+              );
               const key = this._dateKey(date);
               activityMap[key] = (activityMap[key] || 0) + 0.5;
             }
@@ -106,7 +112,10 @@ class ProductivityHeatmap extends React.Component {
 
   _dateKey(date) {
     const d = new Date(date);
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(
+      2,
+      "0"
+    )}-${String(d.getDate()).padStart(2, "0")}`;
   }
 
   _getIntensity(count) {
@@ -187,17 +196,14 @@ class ProductivityHeatmap extends React.Component {
       h(
         "div",
         { className: "heatmap-header" },
-        h(
-          "span",
-          { className: "sidebar-section-title" },
-          "Activity"
-        ),
-        streak > 0 && h(
-          "div",
-          { className: "streak-badge", title: `${streak} day streak!` },
-          h("span", { className: "streak-fire" }, "🔥"),
-          h("span", { className: "streak-count" }, streak)
-        )
+        h("span", { className: "sidebar-section-title" }, "Activity"),
+        streak > 0 &&
+          h(
+            "div",
+            { className: "streak-badge", title: `${streak} day streak!` },
+            h("span", { className: "streak-fire" }, "🔥"),
+            h("span", { className: "streak-count" }, streak)
+          )
       ),
 
       // Heatmap grid
@@ -214,8 +220,15 @@ class ProductivityHeatmap extends React.Component {
               week.map((day) =>
                 h("div", {
                   key: day.key,
-                  className: `heatmap-cell intensity-${day.intensity} ${day.isToday ? "today" : ""}`,
-                  title: `${day.date.toLocaleDateString("en-US", { month: "short", day: "numeric" })}: ${this._getDayLabel(day.count)} (${Math.round(day.count)} events)`,
+                  className: `heatmap-cell intensity-${day.intensity} ${
+                    day.isToday ? "today" : ""
+                  }`,
+                  title: `${day.date.toLocaleDateString("en-US", {
+                    month: "short",
+                    day: "numeric",
+                  })}: ${this._getDayLabel(day.count)} (${Math.round(
+                    day.count
+                  )} events)`,
                   onMouseEnter: () => this.setState({ hoveredDay: day }),
                   onMouseLeave: () => this.setState({ hoveredDay: null }),
                 })
@@ -229,7 +242,10 @@ class ProductivityHeatmap extends React.Component {
           { className: "heatmap-legend" },
           h("span", { className: "heatmap-legend-label" }, "Less"),
           [0, 1, 2, 3, 4].map((i) =>
-            h("div", { key: i, className: `heatmap-cell intensity-${i} legend-cell` })
+            h("div", {
+              key: i,
+              className: `heatmap-cell intensity-${i} legend-cell`,
+            })
           ),
           h("span", { className: "heatmap-legend-label" }, "More")
         )
@@ -242,7 +258,11 @@ class ProductivityHeatmap extends React.Component {
         h(
           "div",
           { className: "heatmap-stat" },
-          h("span", { className: "heatmap-stat-value" }, Math.round(monthTotal)),
+          h(
+            "span",
+            { className: "heatmap-stat-value" },
+            Math.round(monthTotal)
+          ),
           h("span", { className: "heatmap-stat-label" }, "this month")
         ),
         h(
@@ -254,13 +274,22 @@ class ProductivityHeatmap extends React.Component {
       ),
 
       // Hovered day tooltip
-      hoveredDay && h(
-        "div",
-        { className: "heatmap-tooltip" },
-        h("strong", null, hoveredDay.date.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })),
-        ": ",
-        this._getDayLabel(hoveredDay.count)
-      )
+      hoveredDay &&
+        h(
+          "div",
+          { className: "heatmap-tooltip" },
+          h(
+            "strong",
+            null,
+            hoveredDay.date.toLocaleDateString("en-US", {
+              weekday: "short",
+              month: "short",
+              day: "numeric",
+            })
+          ),
+          ": ",
+          this._getDayLabel(hoveredDay.count)
+        )
     );
   }
 }

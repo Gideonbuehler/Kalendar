@@ -18,6 +18,7 @@ const path = require("path");
 // Backend services — loaded in the main process (Node.js context)
 const caldavService = require("./src/services/caldavService");
 const settingsService = require("./src/services/settingsService");
+const tasksService = require("./src/services/tasksService");
 
 /** @type {BrowserWindow|null} Reference to the main application window */
 let mainWindow;
@@ -43,7 +44,7 @@ function createWindow() {
   mainWindow.show(); // Show the window when it's ready
 
   // Open DevTools only in development
-  if (process.env.NODE_ENV !== 'production' && !app.isPackaged) {
+  if (process.env.NODE_ENV !== "production" && !app.isPackaged) {
     mainWindow.webContents.openDevTools();
   }
 }
@@ -196,10 +197,7 @@ ipcMain.handle(
 
 ipcMain.handle(
   "update-event",
-  async (
-    event,
-    { username, password, calendarUrl, eventId, eventData }
-  ) => {
+  async (event, { username, password, calendarUrl, eventId, eventData }) => {
     return await caldavService.updateEvent(
       username,
       password,
@@ -235,4 +233,21 @@ ipcMain.handle("reset-settings", async () => {
     return { success: true, settings };
   }
   return result;
+});
+
+// ── IPC Handlers — Tasks ──────────────────────────────────────────────
+// Persists task lists to a JSON file in the Electron userData directory.
+
+ipcMain.handle("get-tasks", async () => {
+  try {
+    const taskLists = tasksService.getTasks();
+    return { success: true, taskLists };
+  } catch (error) {
+    console.error("Error getting tasks:", error);
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle("save-tasks", async (event, taskLists) => {
+  return tasksService.saveTasks(taskLists);
 });
