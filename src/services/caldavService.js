@@ -1089,6 +1089,85 @@ class CalDAVService {
     }
   }
 
+  /**
+   * deleteCalendar — Permanently deletes a calendar collection from the Nextcloud server.
+   * 
+   * Sends a DELETE HTTP request to the calendar URL using CalDAV protocol.
+   * Validates credentials and URL before attempting deletion.
+   * Includes robust error handling for common failure scenarios:
+   *   - 401/403: Authentication or permission issues
+   *   - 404: Calendar no longer exists on server
+   *   - 405: DELETE method not supported by server
+   *   - Network errors: Connection issues
+   * 
+   * @param {string} username - CalDAV username for authentication
+   * @param {string} password - CalDAV password for authentication
+   * @param {string} calendarUrl - Full URL of the calendar collection to delete
+   * @returns {Promise<{success: boolean, error?: string}>} Success status or error message
+   */
+  async deleteCalendar(username, password, calendarUrl) {
+    try {
+      console.log("Deleting calendar:", { calendarUrl });
+
+      // Validate inputs
+      if (!username || !password) {
+        throw new Error("Missing credentials. Please log in again.");
+      }
+
+      if (!calendarUrl) {
+        throw new Error("No calendar URL provided.");
+      }
+
+      console.log("Full calendar URL for deletion:", calendarUrl);
+
+      // Use raw HTTP request to delete the calendar
+      const response = await this.makeRequest(
+        "DELETE",
+        calendarUrl,
+        null,
+        {},
+        username,
+        password
+      );
+
+      console.log("✅ DELETE calendar response:", {
+        status: response.status,
+        statusText: response.statusText,
+      });
+
+      if (response.status >= 200 && response.status < 300) {
+        console.log("🎉 Calendar deleted successfully - HTTP", response.status);
+        return { success: true };
+      } else {
+        console.warn("⚠️ Unexpected response status:", response.status);
+        return {
+          success: false,
+          error: `Server returned status ${response.status}: ${response.statusText}`,
+        };
+      }
+    } catch (error) {
+      console.error("Delete calendar error:", error);
+
+      let errorMessage = error.message || String(error);
+
+      if (errorMessage.includes("401") || errorMessage.includes("403")) {
+        errorMessage = "Authentication failed. Please check your credentials.";
+      } else if (errorMessage.includes("404")) {
+        errorMessage = "Calendar not found on server.";
+      } else if (errorMessage.includes("405")) {
+        errorMessage = "Calendar deletion not supported by this server.";
+      } else if (
+        errorMessage.includes("network") ||
+        errorMessage.includes("ECONNREFUSED")
+      ) {
+        errorMessage =
+          "Cannot connect to server. Please check your internet connection.";
+      }
+
+      return { success: false, error: errorMessage };
+    }
+  }
+
   /** Escapes special XML characters to prevent injection in PROPPATCH/MKCALENDAR bodies. */
   escapeXml(unsafe) {
     return unsafe

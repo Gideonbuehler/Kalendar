@@ -1143,6 +1143,65 @@ class KalendarApp extends Component {
     }
   };
 
+  /**
+   * handleDeleteCalendar — Deletes a calendar from both the UI and the Nextcloud server.
+   * 
+   * Workflow:
+   *   1. Find the calendar name from state
+   *   2. Optimistically remove from state immediately (better UX)
+   *   3. Send IPC request to main process → caldavService.deleteCalendar()
+   *   4. On success: show confirmation alert, refresh calendars from server
+   *   5. On failure: show error alert, refresh to revert UI changes
+   * 
+   * Uses optimistic updates for immediate feedback, then reconciles with server.
+   * If deletion fails, the calendar list is refreshed from the server.
+   * 
+   * @param {string} calendarUrl - The full URL of the calendar to delete
+   */
+  handleDeleteCalendar = async (calendarUrl) => {
+    console.log("Deleting calendar:", { calendarUrl });
+
+    const calendarName =
+      this.state.calendars.find((cal) => cal.url === calendarUrl)
+        ?.displayName || "Calendar";
+
+    // Optimistic update - remove from state immediately
+    this.setState((prevState) => ({
+      calendars: prevState.calendars.filter((cal) => cal.url !== calendarUrl),
+      selectedCalendarIds: prevState.selectedCalendarIds.filter(
+        (id) => id !== calendarUrl
+      ),
+      showCalendarSettingsModal: false,
+      selectedCalendarForSettings: null,
+      // Remove events from deleted calendar
+      allCalendarEvents: {
+        ...prevState.allCalendarEvents,
+        [calendarUrl]: undefined,
+      },
+    }));
+
+    // Delete on server
+    const result = await ipcRenderer.invoke("delete-calendar", {
+      username: this.state.username,
+      password: this.state.password,
+      calendarUrl: calendarUrl,
+    });
+
+    if (result.success) {
+      console.log("✅ Calendar deleted successfully!");
+      alert(`"${calendarName}" has been deleted.`);
+      // Refresh to confirm deletion
+      this.fetchAllCalendars();
+    } else {
+      console.error("❌ Calendar deletion failed:", result.error);
+      alert("Failed to delete calendar: " + result.error);
+      // Revert on failure
+      setTimeout(() => {
+        this.fetchAllCalendars();
+      }, 500);
+    }
+  };
+
   handleAddCalendarShare = async (calendarUrl, shareEmail, permission) => {
     console.log("Adding calendar share:", {
       calendarUrl,
@@ -1848,6 +1907,7 @@ class KalendarApp extends Component {
           calendar: this.state.selectedCalendarForSettings,
           onUpdateColor: this.handleUpdateCalendarColor,
           onUpdateName: this.handleUpdateCalendarName,
+          onDeleteCalendar: this.handleDeleteCalendar,
           onAddShare: this.handleAddCalendarShare,
           onRemoveShare: this.handleRemoveCalendarShare,
           onClose: () =>

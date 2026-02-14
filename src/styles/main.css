@@ -404,6 +404,22 @@ button {
   background: var(--border-color);
 }
 
+.btn-danger {
+  background: linear-gradient(135deg, #f5365c, #fb6340);
+  color: white;
+  box-shadow: 0 4px 12px rgba(245, 54, 92, 0.3);
+}
+
+.btn-danger:hover {
+  box-shadow: 0 4px 12px rgba(245, 54, 92, 0.5);
+  filter: brightness(1.05);
+}
+
+.btn-danger:active {
+  transform: scale(0.98);
+}
+
+
 .btn-large {
   width: 100%;
   padding: var(--spacing-lg);
@@ -2204,7 +2220,14 @@ button:focus-visible {
   color: var(--text-tertiary);
 }
 
-.list-color-dot {\n  width: 8px;\n  height: 8px;\n  border-radius: 50%;\n  flex-shrink: 0;\n}\n\n.list-name-compact {
+.list-color-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.list-name-compact {
   flex: 1;
   overflow: hidden;
   text-overflow: ellipsis;

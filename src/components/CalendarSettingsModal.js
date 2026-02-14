@@ -74,6 +74,25 @@ class CalendarSettingsModal extends React.Component {
   isValidEmail = (email) => {
     return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
   };
+
+  /**
+   * handleDeleteCalendar — Triggers calendar deletion after user confirmation.
+   * Prompts the user with a confirmation dialog showing the calendar name.
+   * If confirmed, calls the onDeleteCalendar callback passed via props.
+   * This callback is handled by the parent KalendarApp component.
+   */
+  handleDeleteCalendar = () => {
+    const { calendar, onDeleteCalendar } = this.props;
+    if (
+      confirm(
+        `Are you sure you want to delete "${calendar?.displayName || "Calendar"}"? This cannot be undone.`
+      )
+    ) {
+      if (onDeleteCalendar) {
+        onDeleteCalendar(calendar.url);
+      }
+    }
+  };
   render() {
     const { calendar, onClose } = this.props;
     const {
@@ -226,9 +245,28 @@ class CalendarSettingsModal extends React.Component {
                 {
                   className: "btn-primary",
                   onClick: this.handleSaveColor,
-                  style: { marginTop: "1rem" },
+                  style: { marginTop: "1rem", marginBottom: "2rem" },
                 },
                 "Save Color"
+              ),
+              React.createElement(
+                "div",
+                { className: "form-group" },
+                React.createElement("label", null, "Delete Calendar"),
+                React.createElement(
+                  "p",
+                  { style: { fontSize: "0.85rem", color: "var(--text-tertiary)", marginBottom: "0.5rem" } },
+                  "⚠️ This action cannot be undone. The calendar will be permanently deleted."
+                ),
+                React.createElement(
+                  "button",
+                  {
+                    className: "btn-danger",
+                    onClick: this.handleDeleteCalendar,
+                    style: { width: "100%", marginTop: "0.5rem" },
+                  },
+                  "🗑️ Delete Calendar"
+                )
               )
             ),
 
