@@ -156,6 +156,17 @@ ipcMain.handle(
 );
 
 ipcMain.handle(
+  "delete-calendar",
+  async (event, { username, password, calendarUrl }) => {
+    return await caldavService.deleteCalendar(
+      username,
+      password,
+      calendarUrl
+    );
+  }
+);
+
+ipcMain.handle(
   "share-calendar",
   async (
     event,
