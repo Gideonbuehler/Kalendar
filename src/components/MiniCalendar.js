@@ -19,6 +19,24 @@ class MiniCalendar extends React.Component {
     };
   }
 
+  shouldComponentUpdate(nextProps, nextState) {
+    if (this.state.displayMonth !== nextState.displayMonth) return true;
+    if (this.state.activeTab !== nextState.activeTab) return true;
+    if (this.props.events !== nextProps.events) return true;
+    if (this.props.calendars !== nextProps.calendars) return true;
+    if (this.props.selectedCalendarIds !== nextProps.selectedCalendarIds) return true;
+    if (this.props.taskLists !== nextProps.taskLists) return true;
+    if (this.props.showTaskManager !== nextProps.showTaskManager) return true;
+    // Compare selected date by value
+    const selDate = this.props.selectedDate;
+    const nextSelDate = nextProps.selectedDate;
+    if (selDate !== nextSelDate) {
+      if (!selDate || !nextSelDate) return true;
+      if (selDate.getTime() !== nextSelDate.getTime()) return true;
+    }
+    return false;
+  }
+
   /**
    * getDaysInMonth — Builds a 6-week (42-cell) array for the mini calendar grid.
    * Includes trailing days from the previous month and leading days from the

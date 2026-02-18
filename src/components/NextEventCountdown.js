@@ -22,16 +22,47 @@ class NextEventCountdown extends React.Component {
     this._hoverTimeout = null;
   }
 
-  componentDidMount() {
-    // Update every 15 seconds for a live countdown
+  shouldComponentUpdate(nextProps, nextState) {
+    if (this.state.now !== nextState.now) return true;
+    if (this.state.isHovered !== nextState.isHovered) return true;
+    if (this.props.events !== nextProps.events) return true;
+    return false;
+  }
+
+  _startInterval() {
+    if (this._interval) return;
     this._interval = setInterval(() => {
       this.setState({ now: new Date() });
     }, 15000);
   }
 
+  _stopInterval() {
+    if (this._interval) {
+      clearInterval(this._interval);
+      this._interval = null;
+    }
+  }
+
+  componentDidMount() {
+    this._startInterval();
+    // Pause timer when window is hidden to save CPU
+    this._visibilityHandler = () => {
+      if (document.hidden) {
+        this._stopInterval();
+      } else {
+        this.setState({ now: new Date() }); // Refresh immediately on resume
+        this._startInterval();
+      }
+    };
+    document.addEventListener('visibilitychange', this._visibilityHandler);
+  }
+
   componentWillUnmount() {
-    if (this._interval) clearInterval(this._interval);
+    this._stopInterval();
     if (this._hoverTimeout) clearTimeout(this._hoverTimeout);
+    if (this._visibilityHandler) {
+      document.removeEventListener('visibilitychange', this._visibilityHandler);
+    }
   }
 
   /**

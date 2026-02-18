@@ -18,6 +18,17 @@ class DayTimeline extends React.Component {
     this.state = {};
   }
 
+  shouldComponentUpdate(nextProps) {
+    if (this.props.events !== nextProps.events) return true;
+    const selDate = this.props.selectedDate;
+    const nextSelDate = nextProps.selectedDate;
+    if (selDate !== nextSelDate) {
+      if (!selDate || !nextSelDate) return true;
+      if (selDate.getTime() !== nextSelDate.getTime()) return true;
+    }
+    return false;
+  }
+
   _isSameDay(d1, d2) {
     if (!d1 || !d2) return false;
     const a = d1 instanceof Date ? d1 : new Date(d1);
