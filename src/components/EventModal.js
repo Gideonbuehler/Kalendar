@@ -2,29 +2,51 @@
 // EventModal Component — EventModal.js
 // ============================================================================
 // Nextcloud-inspired modal for creating and editing calendar events.
-// Features:
-//   - Calendar color dot + dropdown selector in header
-//   - Split date/time inputs (separate <input type="date"> and <input type="time">)
-//   - Icon-prefixed fields for location (📍) and description (📝)
-//   - Calendar-colored save button for visual association
-//   - Invalid Date guard on all date/time change handlers
+// Manages its own local form state to avoid triggering root re-renders on
+// every keystroke. Only communicates with the parent on submit/close.
 //
 // CSS class prefix: em-* (event modal) to avoid conflicts with base modal styles.
 // ============================================================================
 
 class EventModal extends React.Component {
+  constructor(props) {
+    super(props);
+    // Initialize local form state from props — all changes stay local until submit
+    const ev = props.newEvent || {};
+    this.state = {
+      title: ev.title || "",
+      start: ev.start || new Date(),
+      end: ev.end || new Date(),
+      description: ev.description || "",
+      location: ev.location || "",
+      calendarUrl: ev.calendarUrl || (props.calendars && props.calendars.length > 0 ? props.calendars[0].url : ""),
+    };
+  }
+
+  shouldComponentUpdate(nextProps, nextState) {
+    return (
+      this.state.title !== nextState.title ||
+      this.state.start !== nextState.start ||
+      this.state.end !== nextState.end ||
+      this.state.description !== nextState.description ||
+      this.state.location !== nextState.location ||
+      this.state.calendarUrl !== nextState.calendarUrl ||
+      this.props.isLoading !== nextProps.isLoading ||
+      this.props.calendars !== nextProps.calendars
+    );
+  }
+
   /**
    * _getCalColor — Resolves the color for the currently selected calendar.
    * Looks up by URL in the calendars array, falling back to a hash-based color.
    */
   _getCalColor() {
-    const { newEvent, calendars } = this.props;
-    const url = newEvent.calendarUrl || (calendars && calendars.length > 0 ? calendars[0].url : "");
+    const { calendars } = this.props;
+    const url = this.state.calendarUrl || (calendars && calendars.length > 0 ? calendars[0].url : "");
     if (calendars) {
       const cal = calendars.find((c) => c.url === url);
       if (cal) {
         if (cal.color) return cal.color;
-        // Hash-based fallback
         const colors = ["#5e72e4","#11cdef","#2dce89","#fb6340","#f5365c","#ffd600","#8965e0","#f3a4b5"];
         const name = cal.displayName || "";
         const idx = name.split("").reduce((a, c) => a + c.charCodeAt(0), 0);
@@ -34,31 +56,47 @@ class EventModal extends React.Component {
     return "#5e72e4";
   }
 
-  /**
-   * render — Builds the modal layout.
-   * Structure: overlay → modal → form → [header, body, footer]
-   *
-   * Date handling: formatDateTimeLocal() returns "YYYY-MM-DDTHH:MM",
-   * which is split into separate date and time parts for the two inputs.
-   * On change, makeDate() recombines them and calls onDateChange().
-   */
-  render() {
-    const { newEvent, calendars, onSubmit, onClose, onInputChange, onDateChange, onCalendarChange, isLoading, isEditMode } = this.props;
+  _handleInputChange = (e) => {
+    const { name, value } = e.target;
+    this.setState({ [name]: value });
+  };
 
-    // Resolve calendar color for the header dot and save button
+  _handleCalendarChange = (e) => {
+    this.setState({ calendarUrl: e.target.value });
+  };
+
+  _handleDateChange = (field, date) => {
+    this.setState({ [field]: date });
+  };
+
+  _handleSubmit = (e) => {
+    e.preventDefault();
+    // Pass local form state up to parent on submit
+    if (this.props.onSubmit) {
+      this.props.onSubmit({
+        title: this.state.title,
+        start: this.state.start,
+        end: this.state.end,
+        description: this.state.description,
+        location: this.state.location,
+        calendarUrl: this.state.calendarUrl,
+      });
+    }
+  };
+
+  render() {
+    const { calendars, onClose, isLoading, isEditMode } = this.props;
+    const { title, start, end, description, location, calendarUrl } = this.state;
+
     const calColor = this._getCalColor();
 
-    // Split ISO datetime strings into separate date and time parts
-    // e.g., "2024-01-15T14:30" → date="2024-01-15", time="14:30"
-    const startVal = formatDateTimeLocal(newEvent.start) || "";
-    const endVal = formatDateTimeLocal(newEvent.end) || "";
+    const startVal = formatDateTimeLocal(start) || "";
+    const endVal = formatDateTimeLocal(end) || "";
     const startDate = startVal.split("T")[0] || "";
     const startTime = startVal.split("T")[1] || "";
     const endDate = endVal.split("T")[0] || "";
     const endTime = endVal.split("T")[1] || "";
 
-    // Helper: recombines separate date + time strings into a single Date object
-    // Returns null if either part is missing (prevents Invalid Date)
     const makeDate = (dateStr, timeStr) => {
       if (dateStr && timeStr) return new Date(`${dateStr}T${timeStr}`);
       return null;
@@ -72,7 +110,7 @@ class EventModal extends React.Component {
         { className: "modal event-modal" },
         h(
           "form",
-          { onSubmit: onSubmit },
+          { onSubmit: this._handleSubmit },
 
           // ── Header: Calendar dot + selector + close ──
           h(
@@ -89,10 +127,8 @@ class EventModal extends React.Component {
                 "select",
                 {
                   name: "calendarUrl",
-                  value:
-                    newEvent.calendarUrl ||
-                    (calendars && calendars.length > 0 ? calendars[0].url : ""),
-                  onChange: onCalendarChange || onInputChange,
+                  value: calendarUrl || (calendars && calendars.length > 0 ? calendars[0].url : ""),
+                  onChange: this._handleCalendarChange,
                   required: true,
                   disabled: isLoading || isEditMode,
                   className: "em-cal-select",
@@ -136,8 +172,8 @@ class EventModal extends React.Component {
               type: "text",
               name: "title",
               className: "em-title-input",
-              value: newEvent.title,
-              onChange: onInputChange,
+              value: title,
+              onChange: this._handleInputChange,
               placeholder: "Event title",
               required: true,
               autoFocus: true,
@@ -160,7 +196,7 @@ class EventModal extends React.Component {
                   value: startDate,
                   onChange: (e) => {
                     const d = makeDate(e.target.value, startTime);
-                    if (d && !isNaN(d.getTime())) onDateChange("start", d);
+                    if (d && !isNaN(d.getTime())) this._handleDateChange("start", d);
                   },
                   required: true,
                   disabled: isLoading,
@@ -171,7 +207,7 @@ class EventModal extends React.Component {
                   value: startTime,
                   onChange: (e) => {
                     const d = makeDate(startDate, e.target.value);
-                    if (d && !isNaN(d.getTime())) onDateChange("start", d);
+                    if (d && !isNaN(d.getTime())) this._handleDateChange("start", d);
                   },
                   required: true,
                   disabled: isLoading,
@@ -188,7 +224,7 @@ class EventModal extends React.Component {
                   value: endDate,
                   onChange: (e) => {
                     const d = makeDate(e.target.value, endTime);
-                    if (d && !isNaN(d.getTime())) onDateChange("end", d);
+                    if (d && !isNaN(d.getTime())) this._handleDateChange("end", d);
                   },
                   required: true,
                   disabled: isLoading,
@@ -199,7 +235,7 @@ class EventModal extends React.Component {
                   value: endTime,
                   onChange: (e) => {
                     const d = makeDate(endDate, e.target.value);
-                    if (d && !isNaN(d.getTime())) onDateChange("end", d);
+                    if (d && !isNaN(d.getTime())) this._handleDateChange("end", d);
                   },
                   required: true,
                   disabled: isLoading,
@@ -216,8 +252,8 @@ class EventModal extends React.Component {
                 type: "text",
                 name: "location",
                 className: "em-field-input",
-                value: newEvent.location,
-                onChange: onInputChange,
+                value: location,
+                onChange: this._handleInputChange,
                 placeholder: "Add a location",
                 disabled: isLoading,
               })
@@ -231,8 +267,8 @@ class EventModal extends React.Component {
               h("textarea", {
                 name: "description",
                 className: "em-field-input em-desc",
-                value: newEvent.description,
-                onChange: onInputChange,
+                value: description,
+                onChange: this._handleInputChange,
                 placeholder: "Add a description",
                 rows: 3,
                 disabled: isLoading,

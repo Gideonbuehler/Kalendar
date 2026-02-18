@@ -15,6 +15,10 @@
 const { app, BrowserWindow, ipcMain } = require("electron");
 const path = require("path");
 
+// Performance: enable GPU rasterization for smoother rendering
+app.commandLine.appendSwitch('enable-gpu-rasterization');
+app.commandLine.appendSwitch('enable-zero-copy');
+
 // Backend services — loaded in the main process (Node.js context)
 const caldavService = require("./src/services/caldavService");
 const settingsService = require("./src/services/settingsService");
@@ -35,6 +39,7 @@ function createWindow() {
     webPreferences: {
       nodeIntegration: true,
       contextIsolation: false,
+      backgroundThrottling: false,
     },
   });
 

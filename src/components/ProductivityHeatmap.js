@@ -27,6 +27,13 @@ class ProductivityHeatmap extends React.Component {
     this._cachedActivityMap = null;
   }
 
+  shouldComponentUpdate(nextProps, nextState) {
+    if (this.state.hoveredDay !== nextState.hoveredDay) return true;
+    if (this.props.events !== nextProps.events) return true;
+    if (this.props.taskLists !== nextProps.taskLists) return true;
+    return false;
+  }
+
   /**
    * getActivityData — Builds a map of "YYYY-MM-DD" → activity count.
    * Counts events (1 each) and completed tasks (0.5 each).

@@ -25,6 +25,32 @@ class CalendarView extends React.Component {
     this._lastPreviewTime = null; // Prevents redundant setState when preview time hasn't changed
     this._dropHandled = false;   // Prevents handleGlobalDragEnd from clearing after a successful drop
   }
+  shouldComponentUpdate(nextProps, nextState) {
+    // Only re-render when state that affects the view actually changes
+    if (this.state.isDraggingOver !== nextState.isDraggingOver) return true;
+    if (this.state.previewEvent !== nextState.previewEvent) return true;
+
+    // Check props that affect the rendered output
+    if (this.props.events !== nextProps.events) return true;
+    if (this.props.calendars !== nextProps.calendars) return true;
+    if (this.props.selectedCalendarIds !== nextProps.selectedCalendarIds) return true;
+    if (this.props.isLoading !== nextProps.isLoading) return true;
+    if (this.props.currentView !== nextProps.currentView) return true;
+    if (this.props.settings !== nextProps.settings) return true;
+    if (this.props.showTaskManager !== nextProps.showTaskManager) return true;
+    if (this.props.taskLists !== nextProps.taskLists) return true;
+
+    // Compare dates by value
+    const curDate = this.props.currentDate;
+    const nextDate = nextProps.currentDate;
+    if (curDate !== nextDate) {
+      if (!curDate || !nextDate) return true;
+      if (curDate.getTime() !== nextDate.getTime()) return true;
+    }
+
+    return false;
+  }
+
   /**
    * componentDidMount — Sets up native event listeners for drag-and-drop.
    *
@@ -83,6 +109,7 @@ class CalendarView extends React.Component {
         ghost: null,
         moved: false,
       };
+      this._cacheDropLayout(); // Cache DOM measurements once at drag start
 
       document.addEventListener("mousemove", this._handleEventMouseMove);
       document.addEventListener("mouseup", this._handleEventMouseUp);
@@ -168,7 +195,8 @@ class CalendarView extends React.Component {
         drag.ghost.remove();
       }
 
-      // Clear preview
+      // Clear preview and layout cache
+      this._dropLayoutCache = null;
       this.setState({ previewEvent: null });
 
       // If we actually moved, calculate drop target and fire onEventDrop
@@ -193,8 +221,7 @@ class CalendarView extends React.Component {
             : 60 * 60000;
           const newEnd = new Date(slot.start.getTime() + origDuration);
 
-          console.log("Ctrl+Drag drop:", drag.event.title, "→", slot.start);
-          if (this.props.onEventDrop) {
+              if (this.props.onEventDrop) {
             this.props.onEventDrop({
               event: drag.event,
               start: slot.start,
@@ -421,12 +448,12 @@ class CalendarView extends React.Component {
   };
   // Called when a task starts being dragged from the sidebar TaskManager
   handleTaskDragStart = (dragData) => {
-    console.log("Task drag started:", dragData);
     this._dropHandled = false;
     this._lastPreviewTime = null;
     this._lastDragPosition = null;
     this._isOverCalendar = false;
     this._draggedTask = dragData;
+    this._cacheDropLayout(); // Cache DOM measurements once at drag start
     // Add global listener to clear drag state if dropped elsewhere (not on calendar)
     document.addEventListener("dragend", this.handleGlobalDragEnd, {
       once: true,
@@ -464,8 +491,7 @@ class CalendarView extends React.Component {
     }
 
     if (draggedTask && isOverCalendar && this._lastDragPosition) {
-      console.log("dragend over calendar — treating as drop (fallback)");
-
+  
       // Use the last preview position to calculate the drop slot
       const dropEvent = {
         clientX: this._lastDragPosition.clientX,
@@ -474,10 +500,10 @@ class CalendarView extends React.Component {
       };
 
       const slotInfo = this.calculateDropSlot(dropEvent);
-      console.log("Drop completed (via dragend) — slot:", slotInfo);
 
       // Clear drag state
       this._draggedTask = null;
+      this._dropLayoutCache = null;
       this.setState({
         isDraggingOver: false,
         previewEvent: null,
@@ -495,6 +521,7 @@ class CalendarView extends React.Component {
 
     // Drag ended outside the calendar — clear state
     this._draggedTask = null;
+    this._dropLayoutCache = null;
     this.setState({
       isDraggingOver: false,
       previewEvent: null,
@@ -548,7 +575,6 @@ class CalendarView extends React.Component {
       this._dropProcessed = false;
     }, 0);
 
-    console.log("handleDrop FIRED — processing task drop");
 
     // Mark that drop was handled so handleGlobalDragEnd won't clear state
     this._dropHandled = true;
@@ -568,6 +594,7 @@ class CalendarView extends React.Component {
     }; // Clear drag visual state but keep task data until we process it
     const draggedTask = this._draggedTask;
     this._draggedTask = null;
+    this._dropLayoutCache = null;
 
     this.setState({
       isDraggingOver: false,
@@ -596,7 +623,6 @@ class CalendarView extends React.Component {
       if (data.type === "task") {
         // Calculate the time slot from the drop position
         const slotInfo = this.calculateDropSlot(dropEvent);
-        console.log("Drop completed — slot:", slotInfo);
 
         // Pass the drop event and slot info to parent handler
         if (this.props.onTaskDroppedOnCalendar) {
@@ -608,141 +634,119 @@ class CalendarView extends React.Component {
     }
   };
   /**
-   * calculateDropSlot — Converts a mouse position to a calendar date/time.
-   *
-   * For week/day views: reads the DOM layout of time slots and columns
-   * to calculate which day column and time row the cursor is over.
-   *
-   * For month view: walks up the DOM to find the rbc-date-cell ancestor
-   * and reads the date number from its button link.
-   *
-   * Returns { start: Date, action: string }
+   * _cacheDropLayout — Measures and caches all DOM positions needed for
+   * calculateDropSlot. Called once at drag start instead of on every frame.
    */
-  calculateDropSlot = (e) => {
-    // If e.currentTarget is not available or is not an element, fallback
-    const currentTarget =
-      e.currentTarget ||
-      (this.calendarWrapperRef ? this.calendarWrapperRef : null);
+  _cacheDropLayout = () => {
+    this._dropLayoutCache = null;
+    const wrapper = this.calendarWrapperRef;
+    if (!wrapper) return;
 
-    if (!currentTarget || !currentTarget.querySelector) {
-      return { start: new Date(), action: "auto" };
-    }
+    const calendarEl = wrapper.querySelector(".rbc-calendar");
+    if (!calendarEl) return;
 
-    const calendarEl = currentTarget.querySelector(".rbc-calendar");
-    if (!calendarEl) {
-      return { start: new Date(), action: "auto" };
-    }
+    const timeContent = calendarEl.querySelector(".rbc-time-content");
+    const isTimeView = !!timeContent;
 
-    const hasTimeSlots = calendarEl.querySelector(".rbc-time-content");
-
-    if (hasTimeSlots) {
-      // TIME-BASED VIEW (Week/Day)
-      const timeContent = calendarEl.querySelector(".rbc-time-content");
+    if (isTimeView) {
       const rect = timeContent.getBoundingClientRect();
-
-      // STEP 1: Find which DAY column was clicked
       const dayColumns = calendarEl.querySelectorAll(".rbc-day-slot");
-      let targetDate = new Date(this.props.currentDate || new Date());
+      const headers = calendarEl.querySelectorAll(".rbc-header");
 
+      // Measure all day column bounds + header dates once
+      const columns = [];
       for (let i = 0; i < dayColumns.length; i++) {
         const colRect = dayColumns[i].getBoundingClientRect();
-        if (e.clientX >= colRect.left && e.clientX <= colRect.right) {
-          // Found the column! Now get the date from the header
-          const headers = calendarEl.querySelectorAll(".rbc-header");
-          if (headers[i]) {
-            const headerText = headers[i].textContent;
-            // Extract day number from header (e.g., "Mon 2/10" -> "10")
-            const dateMatch = headerText.match(/\/(\d+)|(\d+)\s/);
-            if (dateMatch) {
-              const day = parseInt(dateMatch[1] || dateMatch[2]);
-              targetDate = new Date(this.props.currentDate || new Date());
-              targetDate.setDate(day);
-            }
+        let headerDay = null;
+        if (headers[i]) {
+          const dateMatch = headers[i].textContent.match(/\/(\d+)|(\d+)\s/);
+          if (dateMatch) headerDay = parseInt(dateMatch[1] || dateMatch[2]);
+        }
+        columns.push({ left: colRect.left, right: colRect.right, headerDay });
+      }
+
+      // Parse calendar start hour from time labels
+      let calendarStartHour = 0;
+      const timeGutter = calendarEl.querySelector(".rbc-time-gutter");
+      const timeLabels = timeGutter ? timeGutter.querySelectorAll(".rbc-label") : [];
+      for (let i = 0; i < timeLabels.length; i++) {
+        const labelText = timeLabels[i].textContent.trim();
+        if (!labelText) continue;
+        const timeMatch = labelText.match(/(\d+)(?::(\d+))?\s*(am|pm)/i);
+        if (timeMatch) {
+          let hour = parseInt(timeMatch[1]);
+          const isPM = timeMatch[3].toLowerCase() === "pm";
+          if (isPM && hour !== 12) hour += 12;
+          else if (!isPM && hour === 12) hour = 0;
+          calendarStartHour = hour;
+          break;
+        }
+      }
+
+      // Measure slot height
+      const daySlotForMeasure = calendarEl.querySelector(".rbc-day-slot");
+      const timeSlotGroups = daySlotForMeasure
+        ? daySlotForMeasure.querySelectorAll(".rbc-timeslot-group")
+        : calendarEl.querySelectorAll(".rbc-timeslot-group");
+      let slotHeight = 12;
+      if (timeSlotGroups.length > 1) {
+        slotHeight = timeSlotGroups[0].offsetHeight / 4;
+      }
+
+      this._dropLayoutCache = {
+        isTimeView: true,
+        timeContentEl: timeContent,
+        rectTop: rect.top,
+        columns,
+        calendarStartHour,
+        slotHeight,
+      };
+    } else {
+      this._dropLayoutCache = { isTimeView: false };
+    }
+  };
+
+  /**
+   * calculateDropSlot — Converts a mouse position to a calendar date/time.
+   * Uses cached DOM measurements from _cacheDropLayout for performance.
+   */
+  calculateDropSlot = (e) => {
+    const cache = this._dropLayoutCache;
+
+    // If no cache, fall back to a single DOM query
+    if (!cache) {
+      this._cacheDropLayout();
+      if (!this._dropLayoutCache) {
+        return { start: new Date(), action: "auto" };
+      }
+      return this.calculateDropSlot(e);
+    }
+
+    if (cache.isTimeView) {
+      let targetDate = new Date(this.props.currentDate || new Date());
+
+      // Find which day column the cursor is over using cached bounds
+      for (let i = 0; i < cache.columns.length; i++) {
+        const col = cache.columns[i];
+        if (e.clientX >= col.left && e.clientX <= col.right) {
+          if (col.headerDay != null) {
+            targetDate = new Date(this.props.currentDate || new Date());
+            targetDate.setDate(col.headerDay);
           }
           break;
         }
       }
 
-      // STEP 2: Calculate TIME from Y position
-      // Find the start hour by looking at actual time labels (skip empty ones)
-      const timeGutter = calendarEl.querySelector(".rbc-time-gutter");
-      const timeLabels = timeGutter
-        ? timeGutter.querySelectorAll(".rbc-label")
-        : [];
-      let calendarStartHour = 0;
-
-      for (let i = 0; i < timeLabels.length; i++) {
-        const labelText = timeLabels[i].textContent.trim();
-        if (!labelText) continue; // Skip empty labels
-        // Parse time like "12am", "1am", "12pm", "1pm", "12:00 AM", "1:00 PM"
-        const timeMatch = labelText.match(/(\d+)(?::(\d+))?\s*(am|pm)/i);
-        if (timeMatch) {
-          let hour = parseInt(timeMatch[1]);
-          const isPM = timeMatch[3].toLowerCase() === "pm";
-
-          // Convert to 24-hour format
-          if (isPM && hour !== 12) {
-            hour += 12;
-          } else if (!isPM && hour === 12) {
-            hour = 0;
-          }
-          calendarStartHour = hour;
-          break; // Use the first non-empty time label
-        }
-      }
-
-      // Get the scroll position of the time content area
-      const scrollTop = timeContent.scrollTop || 0;
-
-      // Calculate Y position relative to the TIME CONTENT area
-      const relativeY = e.clientY - rect.top + scrollTop;
-
-      // Get slot height from the actual time slot groups
-      // Each .rbc-timeslot-group represents one hour when step=15 and timeslots=4
-      // So each group contains 4 individual time slots
-      // Query from a day-slot column (not the gutter) to get accurate rendered heights
-      const daySlotForMeasure = calendarEl.querySelector(".rbc-day-slot");
-      const timeSlotGroups = daySlotForMeasure
-        ? daySlotForMeasure.querySelectorAll(".rbc-timeslot-group")
-        : calendarEl.querySelectorAll(".rbc-timeslot-group");
-      let slotHeight;
-      if (timeSlotGroups.length > 1) {
-        // Use the actual rendered height of a single time slot
-        // Each group = 1 hour, each slot within = step minutes (15 min)
-        const groupHeight = timeSlotGroups[0].offsetHeight;
-        const slotsPerGroup = 4; // timeslots: 4 means 4 slots per group
-        slotHeight = groupHeight / slotsPerGroup;
-      } else {
-        slotHeight = 12; // Reasonable fallback for 15-min slot
-      }
-
-      const minutesPerSlot = 15;
-      const slotsFromTop = Math.floor(relativeY / slotHeight);
-      const minutesFromCalendarStart = slotsFromTop * minutesPerSlot;
-
-      // Add calendar start time to the calculated offset
-      const totalMinutes = calendarStartHour * 60 + minutesFromCalendarStart;
+      // Calculate time from Y position using cached measurements
+      const scrollTop = cache.timeContentEl.scrollTop || 0;
+      const relativeY = e.clientY - cache.rectTop + scrollTop;
+      const slotsFromTop = Math.floor(relativeY / cache.slotHeight);
+      const totalMinutes = cache.calendarStartHour * 60 + slotsFromTop * 15;
 
       targetDate.setHours(Math.floor(totalMinutes / 60));
       targetDate.setMinutes(totalMinutes % 60);
       targetDate.setSeconds(0);
       targetDate.setMilliseconds(0);
-
-      console.log("Drop calculated:", {
-        date: targetDate.toLocaleString(),
-        calendarStartHour,
-        relativeY,
-        scrollTop,
-        clientY: e.clientY,
-        rectTop: rect.top,
-        slotHeight,
-        slotsFromTop,
-        minutesFromCalendarStart,
-        totalMinutes,
-        groupCount: timeSlotGroups.length,
-        groupHeight:
-          timeSlotGroups.length > 0 ? timeSlotGroups[0].offsetHeight : "N/A",
-      });
 
       return { start: targetDate, action: "time-slot" };
     } else {
