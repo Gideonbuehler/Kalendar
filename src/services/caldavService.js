@@ -891,9 +891,9 @@ class CalDAVService {
   }
   /**
    * shareCalendar — Shares a calendar with another Nextcloud user.
-   * Uses the ownCloud sharing namespace (http://owncloud.org/ns).
-   * Note: Requires specific Nextcloud server configuration to work.
-   * The shareWithEmail is converted to a principal URL.
+   * Uses the ownCloud sharing namespace (http://owncloud.org/ns) which is
+   * the standard way Nextcloud handles CalDAV calendar sharing.
+   * Accepts either a Nextcloud username or an email (extracts username part).
    */
   async shareCalendar(
     username,
@@ -911,17 +911,16 @@ class CalDAVService {
 
       if (!username || !password) {
         throw new Error("Missing credentials. Please log in again.");
-      } // Extract the Nextcloud username from the email (or use as-is if it's already a username)
-      // Nextcloud CalDAV sharing uses principal URLs, not email addresses
+      }
+
+      // Accept either a Nextcloud username or email address
       const shareWithUser = shareWithEmail.includes("@")
         ? shareWithEmail.split("@")[0]
         : shareWithEmail;
 
-      // Build the principal URL for the user we're sharing with
-      const principalHref = `principal:principals/users/${shareWithUser}`;
+      // Nextcloud expects the principal as a relative path
+      const principalHref = `/remote.php/dav/principals/users/${shareWithUser}/`;
 
-      // Nextcloud uses the ownCloud sharing namespace (http://owncloud.org/ns)
-      // NOT the CalendarServer namespace (http://calendarserver.org/ns/)
       const accessElement =
         permission === "write" ? `<o:read-write />` : `<o:read />`;
 
@@ -945,27 +944,26 @@ class CalDAVService {
         password
       );
 
-      console.log("✅ Share response:", {
+      console.log("Share response:", {
         status: response.status,
         statusText: response.statusText,
         body: response.body ? response.body.substring(0, 500) : "",
       });
 
       if (response.status >= 200 && response.status < 300) {
-        console.log("👥 Calendar shared successfully with:", shareWithEmail);
+        console.log("Calendar shared successfully with:", shareWithUser);
         return {
           success: true,
           share: {
             email: shareWithEmail,
+            principal: shareWithUser,
             permission: permission,
             id: shareWithUser,
           },
         };
       } else {
-        console.warn("⚠️ Share response status:", response.status);
         let errorMessage = `Server returned status ${response.status}: ${response.statusText}`;
 
-        // Try to parse error from XML response
         if (response.body) {
           const msgMatch = response.body.match(
             /<s:message>([^<]+)<\/s:message>/
@@ -987,8 +985,8 @@ class CalDAVService {
   }
 
   /**
-   * getCalendarShares — Fetches the ACL (access control list) for a calendar.
-   * Currently returns an empty shares array — full ACL parsing is TODO.
+   * getCalendarShares — Fetches the list of users a calendar is shared with.
+   * Uses the ownCloud cs:invite property via PROPFIND to get sharees.
    */
   async getCalendarShares(username, password, calendarUrl) {
     try {
@@ -998,11 +996,12 @@ class CalDAVService {
         throw new Error("Missing credentials. Please log in again.");
       }
 
-      // Get ACL information
+      // Request the ownCloud invite property which lists sharees
       const propfindData = `<?xml version="1.0" encoding="utf-8" ?>
-<D:propfind xmlns:D="DAV:">
+<D:propfind xmlns:D="DAV:" xmlns:o="http://owncloud.org/ns" xmlns:cs="http://calendarserver.org/ns/">
   <D:prop>
-    <D:acl/>
+    <o:invite />
+    <cs:invite />
   </D:prop>
 </D:propfind>`;
 
@@ -1019,14 +1018,14 @@ class CalDAVService {
       );
 
       if (response.status >= 200 && response.status < 300) {
-        // Parse ACL from response
-        // This is simplified - real implementation would parse XML response
-        console.log("📋 Calendar shares fetched");
-        return { success: true, shares: [] };
+        const shares = this._parseSharesFromResponse(response.body, username);
+        console.log("Calendar shares fetched:", shares.length, "shares");
+        return { success: true, shares };
       } else {
         return {
           success: false,
           error: `Server returned status ${response.status}`,
+          shares: [],
         };
       }
     } catch (error) {
@@ -1038,6 +1037,62 @@ class CalDAVService {
       };
     }
   }
+
+  /**
+   * _parseSharesFromResponse — Extracts sharee info from PROPFIND XML response.
+   * Parses both ownCloud and CalendarServer invite namespaces.
+   * Excludes the calendar owner from the shares list.
+   */
+  _parseSharesFromResponse(xmlBody, currentUser) {
+    const shares = [];
+    if (!xmlBody) return shares;
+
+    try {
+      // Match all <o:user> or <cs:user> blocks within invite responses
+      // Each sharee appears as an <o:user> element with href and access info
+      const userBlocks = xmlBody.match(/<(?:o|cs):user>[\s\S]*?<\/(?:o|cs):user>/gi) || [];
+
+      for (const block of userBlocks) {
+        // Extract the principal href (username)
+        const hrefMatch = block.match(/<d:href[^>]*>([^<]+)<\/d:href>/i);
+        if (!hrefMatch) continue;
+
+        const href = hrefMatch[1];
+        // Extract username from principal path like /remote.php/dav/principals/users/john/
+        const userMatch = href.match(/\/users\/([^/]+)/);
+        const shareeUser = userMatch ? userMatch[1] : href;
+
+        // Skip the calendar owner (current user)
+        if (shareeUser === currentUser) continue;
+
+        // Determine permission level
+        let permission = "read";
+        if (block.match(/<o:read-write\s*\/>/i) || block.match(/<cs:read-write\s*\/>/i)) {
+          permission = "write";
+        }
+
+        // Check invite status
+        let status = "accepted";
+        if (block.match(/invite-noresponse/i)) {
+          status = "pending";
+        } else if (block.match(/invite-declined/i)) {
+          status = "declined";
+        }
+
+        shares.push({
+          id: shareeUser,
+          principal: shareeUser,
+          email: shareeUser,
+          permission,
+          status,
+        });
+      }
+    } catch (error) {
+      console.error("Error parsing shares XML:", error);
+    }
+
+    return shares;
+  }
   /**
    * removeCalendarShare — Revokes a previously shared calendar.
    * Sends a POST with the ownCloud un-share XML body.
@@ -1048,14 +1103,15 @@ class CalDAVService {
 
       if (!username || !password) {
         throw new Error("Missing credentials. Please log in again.");
-      } // Extract the Nextcloud username from the email
+      }
+
+      // Accept either a Nextcloud username or email address
       const shareWithUser = shareEmail.includes("@")
         ? shareEmail.split("@")[0]
         : shareEmail;
 
-      const principalHref = `principal:principals/users/${shareWithUser}`;
+      const principalHref = `/remote.php/dav/principals/users/${shareWithUser}/`;
 
-      // Use the ownCloud sharing namespace to remove share
       const unshareXml = `<?xml version="1.0" encoding="utf-8" ?>
 <o:share xmlns:d="DAV:" xmlns:o="http://owncloud.org/ns">
   <o:remove>
@@ -1176,6 +1232,57 @@ class CalDAVService {
       .replace(/>/g, "&gt;")
       .replace(/"/g, "&quot;")
       .replace(/'/g, "&apos;");
+  }
+  /**
+   * searchUsers — Searches for Nextcloud users via the OCS provisioning API.
+   * Returns a list of matching usernames for sharing autocomplete.
+   */
+  async searchUsers(username, password, serverUrl, query) {
+    try {
+      if (!username || !password || !query) {
+        return { success: true, users: [] };
+      }
+
+      // Build the OCS search URL from the server base URL
+      let baseUrl = serverUrl.trim();
+      // Strip /remote.php/dav or similar suffixes to get the Nextcloud root
+      const davIndex = baseUrl.indexOf("/remote.php");
+      if (davIndex !== -1) {
+        baseUrl = baseUrl.substring(0, davIndex);
+      }
+
+      const searchUrl = `${baseUrl}/ocs/v1.php/cloud/users?search=${encodeURIComponent(query)}&format=json`;
+
+      const response = await this.makeRequest(
+        "GET",
+        searchUrl,
+        null,
+        {
+          "OCS-APIRequest": "true",
+          "Accept": "application/json",
+        },
+        username,
+        password
+      );
+
+      if (response.status >= 200 && response.status < 300) {
+        try {
+          const data = JSON.parse(response.body);
+          const users = data?.ocs?.data?.users || [];
+          // Filter out the current user
+          const filtered = users.filter((u) => u !== username);
+          return { success: true, users: filtered };
+        } catch (parseError) {
+          console.error("Error parsing user search response:", parseError);
+          return { success: true, users: [] };
+        }
+      } else {
+        return { success: false, error: `Status ${response.status}`, users: [] };
+      }
+    } catch (error) {
+      console.error("User search error:", error);
+      return { success: false, error: error.message, users: [] };
+    }
   }
 }
 

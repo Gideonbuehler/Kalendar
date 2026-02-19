@@ -518,7 +518,7 @@ button {
 }
 
 .rbc-header {
-  padding: var(--spacing-md);
+  padding: var(--spacing-sm) var(--spacing-md);
   font-weight: 600;
   font-size: var(--font-sm);
   text-transform: uppercase;
@@ -532,6 +532,41 @@ button {
 
 .rbc-header + .rbc-header {
   border-left: none !important;
+}
+
+/* ── Custom Week/Day Header ──────────────────────────────────────────── */
+
+.week-header-cell {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 4px;
+  padding: 10px 0;
+  border-bottom: 2px solid transparent;
+  transition: border-color var(--transition-fast);
+}
+
+.week-header-label {
+  font-size: var(--font-xs);
+  font-weight: 400;
+  color: var(--text-tertiary);
+}
+
+.week-header-num {
+  font-size: var(--font-sm);
+  font-weight: 500;
+  color: var(--text-tertiary);
+}
+
+/* Today — text lights up, thin accent underline */
+.week-header-today {
+  border-bottom-color: var(--primary-color);
+}
+
+.week-header-today .week-header-label,
+.week-header-today .week-header-num {
+  color: var(--primary-color);
+  font-weight: 600;
 }
 
 .rbc-today {
@@ -799,6 +834,7 @@ button {
   border-left: none !important;
   color: var(--text-secondary);
 }
+
 
 [data-theme="dark"] .rbc-month-view,
 [data-theme="dark"] .rbc-time-view,
@@ -1832,12 +1868,65 @@ button:focus-visible {
   gap: var(--spacing-sm);
 }
 
-.share-input-group input {
+.share-input-wrapper {
   flex: 1;
+  position: relative;
+  min-width: 0;
+}
+
+.share-input-wrapper input {
+  width: 100%;
 }
 
 .share-input-group select {
   min-width: 120px;
+  width: auto;
+  flex-shrink: 0;
+}
+
+.share-input-group .btn-primary {
+  flex-shrink: 0;
+  width: auto;
+}
+
+.user-suggestions {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  background: var(--surface);
+  border: 2px solid var(--border-color);
+  border-top: none;
+  border-radius: 0 0 var(--radius-md) var(--radius-md);
+  max-height: 200px;
+  overflow-y: auto;
+  z-index: 1000;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.suggestion-item {
+  padding: var(--spacing-sm) var(--spacing-md);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  font-size: var(--font-sm);
+  color: var(--text-primary);
+  transition: background var(--transition-fast);
+}
+
+.suggestion-item:hover {
+  background: var(--hover-bg);
+}
+
+.suggestion-item.suggestion-loading {
+  color: var(--text-secondary);
+  font-style: italic;
+  cursor: default;
+}
+
+.suggestion-icon {
+  flex-shrink: 0;
 }
 
 .shares-list {

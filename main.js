@@ -22,6 +22,7 @@ app.commandLine.appendSwitch('enable-zero-copy');
 // Backend services — loaded in the main process (Node.js context)
 const caldavService = require("./src/services/caldavService");
 const settingsService = require("./src/services/settingsService");
+const cacheService = require("./src/services/cacheService");
 
 /** @type {BrowserWindow|null} Reference to the main application window */
 let mainWindow;
@@ -252,3 +253,33 @@ ipcMain.handle("reset-settings", async () => {
   }
   return result;
 });
+
+// ── IPC Handlers — Calendar Cache ───────────────────────────────────────
+// Caches calendar data locally so the app can display instantly on startup.
+
+ipcMain.handle("load-calendar-cache", async () => {
+  try {
+    const cache = cacheService.loadCache();
+    return { success: true, cache };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+});
+
+ipcMain.handle("save-calendar-cache", async (event, data) => {
+  return cacheService.saveCache(data);
+});
+
+ipcMain.handle("clear-calendar-cache", async () => {
+  return cacheService.clearCache();
+});
+
+// ── IPC Handler — User Search ───────────────────────────────────────────
+// Searches for Nextcloud users via OCS API for sharing autocomplete.
+
+ipcMain.handle(
+  "search-users",
+  async (event, { serverUrl, username, password, query }) => {
+    return await caldavService.searchUsers(username, password, serverUrl, query);
+  }
+);

@@ -203,22 +203,93 @@ class KalendarApp extends Component {
         result.settings.username &&
         result.settings.password
       ) {
-        this.setState(
-          {
+        // Try to load cached calendar data for instant display
+        const cacheResult = await ipcRenderer.invoke("load-calendar-cache");
+        if (cacheResult.success && cacheResult.cache) {
+          const cache = cacheResult.cache;
+          // Show cached calendar data instantly — no loading screen
+          this.setState({
             serverUrl: result.settings.serverUrl,
             username: result.settings.username,
-            password: result.settings.password, // Ideally this should be stored securely
-          },
-          () => {
-            this.handleLoginSubmit({
+            password: result.settings.password,
+            isConnected: true,
+            calendars: cache.calendars || [],
+            calendarUrl: cache.calendarUrl || "",
+            selectedCalendar: cache.selectedCalendar || null,
+            selectedCalendarIds: cache.selectedCalendarIds || [],
+            events: cache.events || [],
+            allCalendarEvents: cache.allCalendarEvents || {},
+            showLoginForm: false,
+          });
+          // Silently re-authenticate and refresh data in the background
+          this._backgroundRefresh(result.settings);
+        } else {
+          // No cache — fall back to normal login flow
+          this.setState(
+            {
               serverUrl: result.settings.serverUrl,
               username: result.settings.username,
               password: result.settings.password,
-              rememberMe: true,
-            });
+            },
+            () => {
+              this.handleLoginSubmit({
+                serverUrl: result.settings.serverUrl,
+                username: result.settings.username,
+                password: result.settings.password,
+                rememberMe: true,
+              });
+            }
+          );
+        }
+      }
+    }
+  }
+
+  /**
+   * _backgroundRefresh — Silently re-authenticates and refreshes calendar data.
+   * Called on startup when cached data is available so the user sees the
+   * calendar instantly while fresh data loads in the background.
+   */
+  _backgroundRefresh = async (settings) => {
+    try {
+      const connectResult = await ipcRenderer.invoke("connect-caldav", {
+        serverUrl: settings.serverUrl,
+        username: settings.username,
+        password: settings.password,
+      });
+
+      if (connectResult.success) {
+        const eventCalendars = (connectResult.calendars || []).filter(
+          (cal) => cal.components && cal.components.includes("VEVENT")
+        );
+        const selectedCalendarIds = eventCalendars.map((cal) => cal.url);
+        const firstCalendar = eventCalendars[0] || connectResult.calendars[0];
+        const calUrl = firstCalendar ? (firstCalendar.url || firstCalendar.href) : "";
+
+        this.setState(
+          {
+            isConnected: true,
+            calendars: connectResult.calendars,
+            calendarUrl: calUrl,
+            selectedCalendar: firstCalendar || null,
+            selectedCalendarIds: selectedCalendarIds,
+          },
+          () => {
+            this.fetchAllCalendarEvents();
           }
         );
+      } else {
+        // Auth failed — credentials may have changed, show login
+        this.setState({
+          showLoginForm: true,
+          isConnected: false,
+          errorMessage: "Session expired. Please log in again.",
+        });
+        ipcRenderer.invoke("clear-calendar-cache");
       }
+    } catch (error) {
+      console.error("Background refresh error:", error);
+      // Keep showing cached data — user can manually refresh
     }
   }
 
@@ -483,8 +554,57 @@ class KalendarApp extends Component {
         events: [...allEvents, ...preservedEvents],
         isLoading: false,
       };
+    }, () => {
+      // Persist calendar data to disk cache for instant startup next time
+      this._saveCalendarCache();
     });
   };
+
+  /**
+   * fetchAllCalendars — Re-connects to the CalDAV server to refresh the
+   * calendar list (e.g. after creating or deleting a calendar).
+   */
+  fetchAllCalendars = async () => {
+    const result = await ipcRenderer.invoke("connect-caldav", {
+      serverUrl: this.state.serverUrl,
+      username: this.state.username,
+      password: this.state.password,
+    });
+
+    if (result.success) {
+      const eventCalendars = (result.calendars || []).filter(
+        (cal) => cal.components && cal.components.includes("VEVENT")
+      );
+      const selectedCalendarIds = eventCalendars.map((cal) => cal.url);
+
+      this.setState(
+        {
+          calendars: result.calendars,
+          selectedCalendarIds,
+        },
+        () => {
+          this.fetchAllCalendarEvents();
+        }
+      );
+    }
+  };
+
+  /**
+   * _saveCalendarCache — Persists current calendar state to disk so the app
+   * can display the calendar instantly on next startup without waiting for
+   * a network round-trip.
+   */
+  _saveCalendarCache = () => {
+    const { calendars, calendarUrl, selectedCalendar, selectedCalendarIds, events, allCalendarEvents } = this.state;
+    ipcRenderer.invoke("save-calendar-cache", {
+      calendars,
+      calendarUrl,
+      selectedCalendar,
+      selectedCalendarIds,
+      events: events.filter((evt) => !evt.localOnly && !evt.tempId && !evt.pendingSync),
+      allCalendarEvents,
+    });
+  }
   /**
    * fetchSingleCalendarEvents — Refreshes events for one calendar only.
    * Much faster than fetchAllCalendarEvents after a single event create/update/delete.
@@ -1010,11 +1130,30 @@ class KalendarApp extends Component {
     }
   };
 
-  handleCalendarSettings = (calendar) => {
+  handleCalendarSettings = async (calendar) => {
+    // Show modal immediately, then fetch shares from server
     this.setState({
       showCalendarSettingsModal: true,
-      selectedCalendarForSettings: calendar,
+      selectedCalendarForSettings: { ...calendar, shares: calendar.shares || [] },
     });
+
+    // Fetch current shares from the server
+    const result = await ipcRenderer.invoke("get-calendar-shares", {
+      username: this.state.username,
+      password: this.state.password,
+      calendarUrl: calendar.url,
+    });
+
+    if (result.success) {
+      this.setState((prevState) => ({
+        selectedCalendarForSettings: prevState.selectedCalendarForSettings
+          ? { ...prevState.selectedCalendarForSettings, shares: result.shares }
+          : null,
+        calendars: prevState.calendars.map((cal) =>
+          cal.url === calendar.url ? { ...cal, shares: result.shares } : cal
+        ),
+      }));
+    }
   };
 
   handleUpdateCalendarColor = async (calendarUrl, color) => {
@@ -1126,6 +1265,16 @@ class KalendarApp extends Component {
     }
   };
 
+  handleSearchUsers = async (query) => {
+    const result = await ipcRenderer.invoke("search-users", {
+      serverUrl: this.state.serverUrl,
+      username: this.state.username,
+      password: this.state.password,
+      query,
+    });
+    return result.success ? result.users : [];
+  };
+
   handleAddCalendarShare = async (calendarUrl, shareEmail, permission) => {
     const result = await ipcRenderer.invoke("share-calendar", {
       username: this.state.username,
@@ -1205,8 +1354,9 @@ class KalendarApp extends Component {
       password: "",
     };
 
-    // Save cleared settings
+    // Save cleared settings and clear cached calendar data
     ipcRenderer.invoke("save-settings", newSettings);
+    ipcRenderer.invoke("clear-calendar-cache");
 
     // Also clear from state
     this.setState({
@@ -1771,6 +1921,7 @@ class KalendarApp extends Component {
           onDeleteCalendar: this.handleDeleteCalendar,
           onAddShare: this.handleAddCalendarShare,
           onRemoveShare: this.handleRemoveCalendarShare,
+          onSearchUsers: this.handleSearchUsers,
           onClose: this._closeCalendarSettingsModal,
         }),
 

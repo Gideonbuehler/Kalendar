@@ -11,6 +11,27 @@
 //   - Live preview while dragging (ghost element + dashed preview event)
 // ============================================================================
 
+/**
+ * CustomWeekHeader — Minimal day column header for week/day views.
+ * Single line: "Mon 17" with a subtle accent for today.
+ */
+function CustomWeekHeader({ date }) {
+  const dayNum = date.getDate();
+  const dayName = date.toLocaleDateString("en-US", { weekday: "short" });
+  const now = new Date();
+  const isToday =
+    date.getDate() === now.getDate() &&
+    date.getMonth() === now.getMonth() &&
+    date.getFullYear() === now.getFullYear();
+
+  return h(
+    "div",
+    { className: "week-header-cell" + (isToday ? " week-header-today" : "") },
+    h("span", { className: "week-header-label" }, dayName),
+    h("span", { className: "week-header-num" }, dayNum)
+  );
+}
+
 class CalendarView extends React.Component {
   constructor(props) {
     super(props);
@@ -960,6 +981,10 @@ class CalendarView extends React.Component {
               timeslots: 4, // 4 slots per hour (15 min each)
               showMultiDayTimes: true,
               popup: true,
+              components: {
+                week: { header: CustomWeekHeader },
+                day: { header: CustomWeekHeader },
+              },
               // Add CSS class for hover effects
               eventPropGetter: this.eventPropGetter,
             })

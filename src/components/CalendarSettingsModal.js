@@ -3,11 +3,7 @@
 // ============================================================================
 // Per-calendar settings modal with two tabs:
 //   1. General: Rename calendar, change color (16-color palette)
-//   2. Sharing: Share with other users by email (read/write permissions)
-//
-// Note: Sharing functionality requires specific Nextcloud server configuration
-// and may not work on all setups. The UI is present but sharing operations
-// may fail silently on incompatible servers.
+//   2. Sharing: Share with other Nextcloud users (read/write permissions)
 // ============================================================================
 
 class CalendarSettingsModal extends React.Component {
@@ -17,11 +13,29 @@ class CalendarSettingsModal extends React.Component {
       activeTab: "general", // 'general' or 'sharing'
       selectedColor: props.calendar?.color || "#5e72e4",
       calendarName: props.calendar?.displayName || "",
-      shareEmail: "",
+      shareUser: "",
       sharePermission: "read", // 'read' or 'write'
       shares: props.calendar?.shares || [],
+      searchResults: [],
+      showSuggestions: false,
+      isSearching: false,
     };
+    this._searchTimeout = null;
   }
+
+  // Update shares when parent fetches them from server
+  static getDerivedStateFromProps(nextProps, prevState) {
+    const newShares = nextProps.calendar?.shares || [];
+    if (newShares.length !== prevState.shares.length) {
+      return { shares: newShares };
+    }
+    return null;
+  }
+
+  componentWillUnmount() {
+    if (this._searchTimeout) clearTimeout(this._searchTimeout);
+  }
+
   // Handle change in calendar color
   handleColorChange = (color) => {
     this.setState({ selectedColor: color });
@@ -44,26 +58,54 @@ class CalendarSettingsModal extends React.Component {
       onUpdateName(calendar.url, this.state.calendarName);
     }
   };
-  // Handle adding a new share (doesnt really work yet due to Nextcloud API compatibility issues - requires specific configuration on the Nextcloud server)
+
+  // Handle typing in the share input — triggers debounced user search
+  handleShareInputChange = (e) => {
+    const value = e.target.value;
+    this.setState({ shareUser: value });
+
+    if (this._searchTimeout) clearTimeout(this._searchTimeout);
+
+    if (value.length >= 2 && this.props.onSearchUsers) {
+      this.setState({ isSearching: true });
+      this._searchTimeout = setTimeout(async () => {
+        const users = await this.props.onSearchUsers(value);
+        this.setState({
+          searchResults: users || [],
+          showSuggestions: (users || []).length > 0,
+          isSearching: false,
+        });
+      }, 300);
+    } else {
+      this.setState({ searchResults: [], showSuggestions: false, isSearching: false });
+    }
+  };
+
+  // Select a user from the suggestions dropdown
+  handleSelectUser = (username) => {
+    this.setState({ shareUser: username, showSuggestions: false, searchResults: [] });
+  };
+
+  // Handle adding a new share — accepts Nextcloud username or email
   handleAddShare = () => {
-    const { shareEmail, sharePermission } = this.state;
-    if (!shareEmail) {
-      alert("Please enter an email address");
+    const { shareUser, sharePermission } = this.state;
+    if (!shareUser) {
+      alert("Please enter a Nextcloud username or email address");
       return;
     }
 
-    if (!this.isValidEmail(shareEmail)) {
-      alert("Please enter a valid email address");
+    if (!this.isValidShareTarget(shareUser)) {
+      alert("Please enter a valid Nextcloud username or email address");
       return;
     }
 
     const { calendar, onAddShare } = this.props;
     if (onAddShare) {
-      onAddShare(calendar.url, shareEmail, sharePermission);
-      this.setState({ shareEmail: "", sharePermission: "read" });
+      onAddShare(calendar.url, shareUser, sharePermission);
+      this.setState({ shareUser: "", sharePermission: "read", showSuggestions: false, searchResults: [] });
     }
   };
-  // Delete a share (doesnt really work yet due to Nextcloud API compatibility issues - requires specific configuration on the Nextcloud server) 
+
   handleRemoveShare = (shareId) => {
     const { calendar, onRemoveShare } = this.props;
     if (onRemoveShare && confirm("Remove this share?")) {
@@ -71,8 +113,12 @@ class CalendarSettingsModal extends React.Component {
     }
   };
 
-  isValidEmail = (email) => {
-    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+  // Accept Nextcloud usernames (alphanumeric, dots, dashes, underscores) or emails
+  isValidShareTarget = (input) => {
+    if (input.includes("@")) {
+      return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(input);
+    }
+    return /^[a-zA-Z0-9._-]+$/.test(input);
   };
 
   /**
@@ -99,9 +145,12 @@ class CalendarSettingsModal extends React.Component {
       activeTab,
       selectedColor,
       calendarName,
-      shareEmail,
+      shareUser,
       sharePermission,
       shares,
+      searchResults,
+      showSuggestions,
+      isSearching,
     } = this.state;
 
     const colors = [
@@ -122,7 +171,7 @@ class CalendarSettingsModal extends React.Component {
       "#ff9ff3",
       "#54a0ff",
     ];
-    // Setting window that shows up when you click the settings icon on a calendar - allows you to change the calendar name and color, as well as share the calendar with other users (sharing functionality is currently disabled due to Nextcloud API compatibility issues - requires specific configuration on the Nextcloud server)
+    // Settings modal for calendar name, color, and sharing with other Nextcloud users
     return React.createElement(
       "div",
       { className: "modal-overlay", onClick: onClose },
@@ -158,7 +207,7 @@ class CalendarSettingsModal extends React.Component {
             },
             "×"
           )
-        ), // Tabs (Sharing disabled temporarily due to Nextcloud API compatibility issues)
+        ),
         React.createElement(
           "div",
           { className: "settings-tabs" },
@@ -170,7 +219,6 @@ class CalendarSettingsModal extends React.Component {
             },
             "🎨 General"
           ),
-          //Sharing tab temporarily disabled - requires Nextcloud-specific configuration
           React.createElement(
             "button",
             {
@@ -281,7 +329,7 @@ class CalendarSettingsModal extends React.Component {
                 React.createElement(
                   "p",
                   null,
-                  "Share this calendar with other users. They will receive an invitation to access your calendar."
+                  "Share this calendar with other Nextcloud users. Start typing to search for users."
                 )
               ),
               React.createElement(
@@ -291,18 +339,56 @@ class CalendarSettingsModal extends React.Component {
                 React.createElement(
                   "div",
                   { className: "share-input-group" },
-                  React.createElement("input", {
-                    type: "email",
-                    placeholder: "user@example.com",
-                    value: shareEmail,
-                    onChange: (e) =>
-                      this.setState({ shareEmail: e.target.value }),
-                    onKeyPress: (e) => {
-                      if (e.key === "Enter") {
-                        this.handleAddShare();
-                      }
-                    },
-                  }),
+                  React.createElement(
+                    "div",
+                    { className: "share-input-wrapper" },
+                    React.createElement("input", {
+                      type: "text",
+                      placeholder: "Search for a user...",
+                      value: shareUser,
+                      onChange: this.handleShareInputChange,
+                      onKeyPress: (e) => {
+                        if (e.key === "Enter") {
+                          this.handleAddShare();
+                        }
+                      },
+                      onBlur: () => {
+                        // Delay hiding so click on suggestion registers first
+                        setTimeout(() => this.setState({ showSuggestions: false }), 200);
+                      },
+                      onFocus: () => {
+                        if (searchResults.length > 0) {
+                          this.setState({ showSuggestions: true });
+                        }
+                      },
+                      autoComplete: "off",
+                    }),
+                    // Suggestions dropdown
+                    (showSuggestions || isSearching) &&
+                      React.createElement(
+                        "div",
+                        { className: "user-suggestions" },
+                        isSearching
+                          ? React.createElement(
+                              "div",
+                              { className: "suggestion-item suggestion-loading" },
+                              "Searching..."
+                            )
+                          : searchResults.map((user) =>
+                              React.createElement(
+                                "div",
+                                {
+                                  key: user,
+                                  className: "suggestion-item",
+                                  onMouseDown: (e) => e.preventDefault(),
+                                  onClick: () => this.handleSelectUser(user),
+                                },
+                                React.createElement("span", { className: "suggestion-icon" }, "👤"),
+                                React.createElement("span", null, user)
+                              )
+                            )
+                      )
+                  ),
                   React.createElement(
                     "select",
                     {
@@ -347,21 +433,22 @@ class CalendarSettingsModal extends React.Component {
                     : shares.map((share, index) =>
                         React.createElement(
                           "div",
-                          { key: index, className: "share-item" },
+                          { key: share.id || index, className: "share-item" },
                           React.createElement(
                             "div",
                             { className: "share-info-row" },
                             React.createElement(
                               "span",
                               { className: "share-email" },
-                              share.email || share.principal
+                              share.principal || share.email || share.id
                             ),
                             React.createElement(
                               "span",
                               { className: "share-permission" },
-                              share.permission === "write"
-                                ? "✏️ Can edit"
-                                : "👁️ Can view"
+                              (share.permission === "write"
+                                ? "Can edit"
+                                : "Can view") +
+                              (share.status === "pending" ? " (pending)" : "")
                             )
                           ),
                           React.createElement(
@@ -369,7 +456,7 @@ class CalendarSettingsModal extends React.Component {
                             {
                               className: "btn-icon-small",
                               onClick: () =>
-                                this.handleRemoveShare(share.id || index),
+                                this.handleRemoveShare(share.id || share.email || share.principal),
                               title: "Remove share",
                             },
                             "🗑️"
