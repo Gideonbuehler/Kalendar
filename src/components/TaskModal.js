@@ -51,13 +51,17 @@ class TaskModal extends React.Component {
       const startDate = new Date(year, month - 1, day, hours, minutes);
       const endDate = new Date(startDate.getTime() + duration * 60000);
 
-      this.props.onAddToCalendar({
-        title: taskName,
-        start: startDate,
-        end: endDate,
-        description: notes || `Task from list: ${this.props.listName}`,
-        location: "",
-      });
+      // Also pass the task edits so they're saved along with scheduling it
+      this.props.onAddToCalendar(
+        {
+          title: taskName,
+          start: startDate,
+          end: endDate,
+          description: notes || `Task from list: ${this.props.listName}`,
+          location: "",
+        },
+        taskData
+      );
     } else {
       this.props.onSubmit(taskData);
     }
@@ -176,7 +180,7 @@ class TaskModal extends React.Component {
                   onChange: (e) =>
                     this.setState({ addToCalendar: e.target.checked }),
                 }),
-                React.createElement("span", null, "📅 Add to calendar")
+                React.createElement("span", null, "Add to calendar")
               )
             ),
           React.createElement(

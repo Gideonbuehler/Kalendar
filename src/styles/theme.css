@@ -2709,3 +2709,269 @@ body.event-dragging .rbc-day-bg:hover {
   filter: brightness(1.1) saturate(1.2);
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25) !important;
 }
+
+/* ============================================================================
+   Event details, editing & feedback
+   ============================================================================ */
+
+/* "+ New event" button in the header */
+.btn-new-event {
+  height: 36px;
+  padding: 0 14px;
+  margin-right: var(--spacing-sm);
+  background: var(--primary-color);
+  color: white;
+  border: none;
+  border-radius: var(--radius-md);
+  font-size: var(--font-sm);
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  transition: filter var(--transition-fast);
+}
+
+.btn-new-event:hover {
+  filter: brightness(1.1);
+}
+
+/* Event popover details */
+.context-menu {
+  max-width: 320px;
+}
+
+.context-menu-title {
+  max-width: 260px;
+}
+
+.context-menu-details {
+  padding: var(--spacing-sm) var(--spacing-md);
+  border-bottom: 1px solid var(--border-color);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: var(--font-sm);
+  color: var(--text-secondary);
+}
+
+.context-menu-when {
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
+.context-menu-detail {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.context-menu-cal-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.context-menu-description {
+  white-space: pre-wrap;
+  max-height: 120px;
+  overflow-y: auto;
+  color: var(--text-primary);
+  padding-top: 2px;
+}
+
+/* Event modal: all-day toggle, validation, recurring scope, delete */
+.em-allday {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 48px;
+  font-size: var(--font-sm);
+  color: var(--text-primary);
+  cursor: pointer;
+  user-select: none;
+}
+
+.em-error {
+  margin-left: 48px;
+  font-size: var(--font-sm);
+  color: #f5365c;
+}
+
+.em-scope {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 14px;
+  padding: 8px 12px;
+  border-radius: var(--radius-md);
+  background: var(--selection-bg);
+  font-size: var(--font-sm);
+  color: var(--text-primary);
+}
+
+.em-scope-label {
+  font-weight: 600;
+}
+
+.em-scope label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+}
+
+.em-btn--danger {
+  margin-right: auto;
+  background: transparent;
+  color: #f5365c;
+  border: 1.5px solid rgba(245, 54, 92, 0.4);
+}
+
+.em-btn--danger:hover {
+  background: rgba(245, 54, 92, 0.08);
+}
+
+.em-btn--primary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  filter: none;
+}
+
+/* Calendar events */
+.kal-event-recurring {
+  margin-right: 4px;
+  opacity: 0.85;
+}
+
+.rbc-event.rbc-event-pending {
+  opacity: 0.6;
+}
+
+.rbc-week-number {
+  float: left;
+  font-size: var(--font-xs);
+  color: var(--text-tertiary);
+  padding-left: 4px;
+}
+
+/* Transient notice (confirmations and errors) */
+.kal-notice {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 20000;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: min(560px, calc(100vw - 32px));
+  padding: 10px 14px 10px 16px;
+  border-radius: var(--radius-md);
+  background: #32325d;
+  color: white;
+  font-size: var(--font-sm);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.25);
+  animation: contextMenuAppear 160ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.kal-notice--error {
+  background: #c62a4a;
+}
+
+.kal-notice-close {
+  background: none;
+  border: none;
+  color: inherit;
+  font-size: 1.2rem;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0.8;
+}
+
+.kal-notice-close:hover {
+  opacity: 1;
+}
+
+/* Mini calendar: today stays readable when it is also the selected day */
+.mini-calendar-day.today.selected {
+  background: var(--primary-color);
+  color: white;
+}
+
+/* Week/day view: give all-day events some room below the day headers */
+.rbc-time-header-content .rbc-allday-cell .rbc-row-content {
+  padding: 4px 0 2px;
+}
+
+.rbc-allday-cell .rbc-event {
+  padding-top: 2px;
+  padding-bottom: 2px;
+}
+
+/* Short events (≤ 30 min) show their title instead of the time range, which
+   would fill the whole box; the time is in the tooltip and the popover */
+.rbc-day-slot .rbc-event.rbc-event-short .rbc-event-label {
+  display: none;
+}
+
+.rbc-day-slot .rbc-event.rbc-event-short .rbc-event-content {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Line icons (see kalIcon in helpers.js) */
+.kal-icon {
+  display: inline-block;
+  vertical-align: middle;
+  flex-shrink: 0;
+}
+
+.btn-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.kal-icon-spin {
+  animation: kalIconSpin 900ms linear infinite;
+}
+
+@keyframes kalIconSpin {
+  to { transform: rotate(360deg); }
+}
+
+.logo-icon .kal-icon {
+  color: var(--primary-color);
+}
+
+.calendar-settings-btn,
+.task-to-calendar-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Header countdown: a small status dot instead of an icon */
+.next-event-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--text-tertiary);
+}
+
+.next-event-countdown.active .next-event-dot,
+.next-event-countdown.urgency-critical .next-event-dot {
+  background: #f5365c;
+}
+
+.next-event-countdown.urgency-high .next-event-dot {
+  background: #fb6340;
+}
+
+.next-event-countdown.urgency-medium .next-event-dot {
+  background: var(--primary-color);
+}

@@ -6,7 +6,7 @@
 //
 // Features:
 //   - Color-coded cells (4 intensity levels) based on daily event count
-//   - Streak counter (🔥 X) showing consecutive active days
+//   - Streak counter showing consecutive active days
 //   - Monthly total events counter
 //   - Hover tooltip with date and activity level
 //   - Legend (Less ─ More) for intensity reference
@@ -202,8 +202,7 @@ class ProductivityHeatmap extends React.Component {
         streak > 0 && h(
           "div",
           { className: "streak-badge", title: `${streak} day streak!` },
-          h("span", { className: "streak-fire" }, "🔥"),
-          h("span", { className: "streak-count" }, streak)
+          h("span", { className: "streak-count" }, `${streak}-day streak`)
         )
       ),
 

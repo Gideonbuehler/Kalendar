@@ -79,7 +79,7 @@ class CreateCalendarModal extends React.Component {
             h(
               "div",
               { className: "form-group" },
-              h("label", null, "📝 Calendar Name"),
+              h("label", null, "Calendar Name"),
               h("input", {
                 type: "text",
                 value: calendarName,
@@ -93,7 +93,7 @@ class CreateCalendarModal extends React.Component {
             h(
               "div",
               { className: "form-group" },
-              h("label", null, "🎨 Calendar Color"),
+              h("label", null, "Calendar Color"),
               h(
                 "div",
                 { className: "color-picker-grid" },
@@ -126,7 +126,6 @@ class CreateCalendarModal extends React.Component {
             h(
               "div",
               { className: "info-message" },
-              h("span", null, "💡 "),
               "Calendars are created on your Nextcloud server and will sync across all devices."
             )
           ),

@@ -110,12 +110,16 @@ ipcMain.handle(
 
 ipcMain.handle(
   "delete-event",
-  async (event, { serverUrl, username, password, calendarUrl, eventId }) => {
+  async (
+    event,
+    { serverUrl, username, password, calendarUrl, eventId, eventUrl, recurrenceId }
+  ) => {
     return await caldavService.deleteEvent(
       username,
       password,
       calendarUrl,
-      eventId
+      eventId,
+      { eventUrl, recurrenceId }
     );
   }
 );
@@ -124,14 +128,15 @@ ipcMain.handle(
   "create-calendar",
   async (
     event,
-    { serverUrl, username, password, calendarName, calendarColor }
+    { serverUrl, username, password, calendarName, calendarColor, homeUrl }
   ) => {
     return await caldavService.createCalendar(
       username,
       password,
       serverUrl,
       calendarName,
-      calendarColor
+      calendarColor,
+      homeUrl
     );
   }
 );
@@ -214,14 +219,25 @@ ipcMain.handle(
   "update-event",
   async (
     event,
-    { username, password, calendarUrl, eventId, eventData }
+    {
+      username,
+      password,
+      calendarUrl,
+      eventId,
+      eventData,
+      eventUrl,
+      recurrenceId,
+      scope,
+      originalStart,
+    }
   ) => {
     return await caldavService.updateEvent(
       username,
       password,
       calendarUrl,
       eventId,
-      eventData
+      eventData,
+      { eventUrl, recurrenceId, scope, originalStart }
     );
   }
 );

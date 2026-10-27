@@ -19,8 +19,26 @@ class MiniCalendar extends React.Component {
     };
   }
 
+  componentDidUpdate(prevProps) {
+    // Follow the main calendar: show the month of the date navigated to
+    const sel = this.props.selectedDate;
+    const prevSel = prevProps.selectedDate;
+    if (
+      sel &&
+      (!prevSel ||
+        sel.getMonth() !== prevSel.getMonth() ||
+        sel.getFullYear() !== prevSel.getFullYear())
+    ) {
+      const shown = this.state.displayMonth;
+      if (sel.getMonth() !== shown.getMonth() || sel.getFullYear() !== shown.getFullYear()) {
+        this.setState({ displayMonth: new Date(sel.getFullYear(), sel.getMonth(), 1) });
+      }
+    }
+  }
+
   shouldComponentUpdate(nextProps, nextState) {
     if (this.state.displayMonth !== nextState.displayMonth) return true;
+    if (this.props.firstDayOfWeek !== nextProps.firstDayOfWeek) return true;
     if (this.state.activeTab !== nextState.activeTab) return true;
     if (this.props.events !== nextProps.events) return true;
     if (this.props.calendars !== nextProps.calendars) return true;
@@ -48,7 +66,7 @@ class MiniCalendar extends React.Component {
     const firstDay = new Date(year, month, 1);
     const lastDay = new Date(year, month + 1, 0);
     const daysInMonth = lastDay.getDate();
-    const startingDayOfWeek = firstDay.getDay();
+    const startingDayOfWeek = (firstDay.getDay() - (this.props.firstDayOfWeek || 0) + 7) % 7;
 
     const days = [];
 
@@ -105,13 +123,24 @@ class MiniCalendar extends React.Component {
     );
   }
 
-  hasEvents(date) {
+  /** Set of "Y-M-D" keys of days with events (rebuilt only when events change). */
+  _getEventDays() {
     const { events } = this.props;
-    if (!events) return false;
-    return events.some((event) => {
-      const eventStart = new Date(event.start);
-      return this.isSameDay(eventStart, date);
+    if (this._eventDaysFor === events) return this._eventDays;
+    const days = new Set();
+    (events || []).forEach((event) => {
+      const d = new Date(event.start);
+      days.add(`${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`);
     });
+    this._eventDaysFor = events;
+    this._eventDays = days;
+    return days;
+  }
+
+  hasEvents(date) {
+    return this._getEventDays().has(
+      `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`
+    );
   }
 
   handlePrevMonth = () => {
@@ -127,6 +156,9 @@ class MiniCalendar extends React.Component {
   };
 
   handleDayClick = (date) => {
+    if (date.getMonth() !== this.state.displayMonth.getMonth()) {
+      this.setState({ displayMonth: new Date(date.getFullYear(), date.getMonth(), 1) });
+    }
     if (this.props.onDateSelect) {
       this.props.onDateSelect(date);
     }
@@ -164,15 +196,18 @@ class MiniCalendar extends React.Component {
           "div",
           { className: "mini-calendar-nav" },
           h("button", { onClick: this.handlePrevMonth, title: "Previous month" }, "‹"),
+          h("button", { onClick: () => this.handleDayClick(new Date()), title: "Go to today" }, "•"),
           h("button", { onClick: this.handleNextMonth, title: "Next month" }, "›")
         )
       ),
       h(
         "div",
         { className: "mini-calendar-grid" },
-        ["S", "M", "T", "W", "T", "F", "S"].map((day, idx) =>
-          h("div", { key: `header-${idx}`, className: "mini-calendar-day-header" }, day)
-        ),
+        ["S", "M", "T", "W", "T", "F", "S", "S", "M", "T", "W", "T", "F", "S"]
+          .slice(this.props.firstDayOfWeek || 0, (this.props.firstDayOfWeek || 0) + 7)
+          .map((day, idx) =>
+            h("div", { key: `header-${idx}`, className: "mini-calendar-day-header" }, day)
+          ),
         days.map((dayInfo, idx) => {
           const classNames = ["mini-calendar-day"];
           if (this.isToday(dayInfo.date)) classNames.push("today");
@@ -185,7 +220,7 @@ class MiniCalendar extends React.Component {
             {
               key: idx,
               className: classNames.join(" "),
-              onClick: () => dayInfo.isCurrentMonth && this.handleDayClick(dayInfo.date),
+              onClick: () => this.handleDayClick(dayInfo.date),
             },
             dayInfo.day
           );
@@ -243,7 +278,7 @@ class MiniCalendar extends React.Component {
         h(
           "h1",
           { className: "app-title-sidebar" },
-          h("span", { className: "logo-icon" }, "📅"),
+          h("span", { className: "logo-icon" }, kalIcon("calendar", { size: 24 })),
           "Kalendar"
         )
       ),
@@ -258,7 +293,6 @@ class MiniCalendar extends React.Component {
             className: `sidebar-tab ${activeTab === "calendar" ? "active" : ""}`,
             onClick: () => this.setState({ activeTab: "calendar" }),
           },
-          h("span", { className: "sidebar-tab-icon" }, "📅"),
           "Calendar"
         ),
         h(
@@ -267,7 +301,6 @@ class MiniCalendar extends React.Component {
             className: `sidebar-tab ${activeTab === "activity" ? "active" : ""}`,
             onClick: () => this.setState({ activeTab: "activity" }),
           },
-          h("span", { className: "sidebar-tab-icon" }, "📊"),
           "Activity"
         )
       ),
@@ -338,8 +371,9 @@ class MiniCalendar extends React.Component {
                         }
                       },
                       title: "Calendar settings",
+                      "aria-label": "Calendar settings",
                     },
-                    "⚙"
+                    kalIcon("settings", { size: 14 })
                   )
                 );
               })
