@@ -13,7 +13,7 @@
 //   6. Longest upcoming event
 //   7. Task completion rate (across all task lists)
 //
-// Each insight includes an emoji icon, text, detail, and a type
+// Each insight includes text, detail, and a type
 // (stat/pattern/positive/warning) for styling differentiation.
 // ============================================================================
 
@@ -51,7 +51,6 @@ class EventInsights extends React.Component {
     const busiestDayIdx = dayCounts.indexOf(Math.max(...dayCounts));
     if (dayCounts[busiestDayIdx] > 0) {
       insights.push({
-        icon: "📊",
         text: `Busiest day: ${dayNames[busiestDayIdx]}`,
         detail: `${dayCounts[busiestDayIdx]} events total`,
         type: "stat",
@@ -70,7 +69,6 @@ class EventInsights extends React.Component {
       // Find original casing
       const original = realEvents.find((e) => e.title.trim().toLowerCase() === title);
       insights.push({
-        icon: "🔁",
         text: `"${original ? original.title : title}" repeats`,
         detail: `${count} times`,
         type: "pattern",
@@ -87,7 +85,6 @@ class EventInsights extends React.Component {
     const avgPerDay = uniqueDays.size > 0 ? (recentEvents.length / 14).toFixed(1) : 0;
     if (recentEvents.length > 0) {
       insights.push({
-        icon: "📈",
         text: `~${avgPerDay} events/day`,
         detail: "Last 2 weeks avg",
         type: "stat",
@@ -104,7 +101,6 @@ class EventInsights extends React.Component {
       const ampm = peakHour >= 12 ? "PM" : "AM";
       const h12 = peakHour % 12 || 12;
       insights.push({
-        icon: "⏰",
         text: `Peak hour: ${h12} ${ampm}`,
         detail: `${hourCounts[peakHour]} events`,
         type: "stat",
@@ -141,14 +137,12 @@ class EventInsights extends React.Component {
       const freeStr = freeHrs > 0 ? `${freeHrs}h ${freeM}m` : `${freeM}m`;
 
       insights.push({
-        icon: freeMins < 60 ? "🔥" : "🟢",
         text: `${freeStr} free today`,
         detail: freeMins < 60 ? "Packed schedule!" : "In working hours",
         type: freeMins < 60 ? "warning" : "positive",
       });
     } else {
       insights.push({
-        icon: "🌴",
         text: "No events today",
         detail: "Enjoy the free time!",
         type: "positive",
@@ -174,7 +168,6 @@ class EventInsights extends React.Component {
       const mins = Math.floor((longestDuration % 3600000) / 60000);
       const durStr = hrs > 0 ? `${hrs}h ${mins}m` : `${mins}m`;
       insights.push({
-        icon: "📏",
         text: `Longest: ${longest.title}`,
         detail: durStr,
         type: "stat",
@@ -196,7 +189,6 @@ class EventInsights extends React.Component {
       if (total > 0) {
         const pct = Math.round((done / total) * 100);
         insights.push({
-          icon: pct >= 75 ? "🏆" : pct >= 50 ? "👍" : "📝",
           text: `Tasks: ${pct}% done`,
           detail: `${done}/${total} completed`,
           type: pct >= 75 ? "positive" : "stat",
@@ -247,7 +239,6 @@ class EventInsights extends React.Component {
               key: idx,
               className: `event-insight-item ${insight.type}`,
             },
-            h("span", { className: "event-insight-icon" }, insight.icon),
             h(
               "div",
               { className: "event-insight-text" },

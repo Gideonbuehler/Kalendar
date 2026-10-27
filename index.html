@@ -5,8 +5,9 @@
   The main HTML file loaded by Electron's BrowserWindow.
 
   Architecture:
-    - React 17 + ReactDOM loaded from CDN (no build step / no JSX)
-    - react-big-calendar + Moment.js for the calendar display
+    - React 17 + ReactDOM loaded from node_modules via require() (no build
+      step / no JSX, and no CDN, so the app also starts offline)
+    - react-big-calendar + its drag-and-drop addon + Moment.js for the calendar
     - Global alias `h = React.createElement` used by all components
     - Components loaded as plain <script> tags in dependency order
     - Styles: theme.css (CSS variables) + main.css (layout & components)
@@ -21,20 +22,28 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self' https://unpkg.com; script-src 'self' 'unsafe-inline' https://unpkg.com; style-src 'self' 'unsafe-inline' https://unpkg.com; font-src 'self' data:; img-src 'self' data:;">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data:;">
   <title>Kalendar - Nextcloud Calendar</title>
-  <link rel="stylesheet" href="https://unpkg.com/react-big-calendar@0.38.9/lib/css/react-big-calendar.css">
+  <link rel="stylesheet" href="./node_modules/react-big-calendar/lib/css/react-big-calendar.css">
+  <link rel="stylesheet" href="./node_modules/react-big-calendar/lib/addons/dragAndDrop/styles.css">
   <link rel="stylesheet" href="./src/styles/main.css">
   <link rel="stylesheet" href="./src/styles/theme.css">
 </head>
 <body>
   <div id="app"></div>
   
-  <!-- Load dependencies from CDN -->  <script crossorigin src="https://unpkg.com/react@17.0.2/umd/react.production.min.js"></script>
-  <script crossorigin src="https://unpkg.com/react-dom@17.0.2/umd/react-dom.production.min.js"></script>
-  <script src="https://unpkg.com/moment@2.29.4/moment.js"></script>
-  <script src="https://unpkg.com/react-big-calendar@0.38.9/dist/react-big-calendar.js"></script>
-  
+  <!-- Load dependencies from node_modules and expose them as globals.
+       All of them must share this single React instance. -->
+  <script>
+    if (!process.env.NODE_ENV) process.env.NODE_ENV = "production";
+    window.React = require("react");
+    window.ReactDOM = require("react-dom");
+    window.moment = require("moment");
+    window.ReactBigCalendar = Object.assign({}, require("react-big-calendar"), {
+      withDragAndDrop: require("react-big-calendar/lib/addons/dragAndDrop"),
+    });
+  </script>
+
   <!-- Global React.createElement alias used by all components -->
   <script>var h = React.createElement;</script>
   

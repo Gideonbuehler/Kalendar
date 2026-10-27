@@ -3,9 +3,9 @@
 // ============================================================================
 // Live countdown timer displayed in the app header.
 // Shows one of three states:
-//   1. Active event: 🔴 pulse + "[title] — Xh Ym left"
+//   1. Active event: red dot + "[title] — Xh Ym left"
 //   2. Upcoming event: countdown with urgency coloring (critical/high/medium/low)
-//   3. No events: ✨ "No upcoming events"
+//   3. No events: "No upcoming events"
 //
 // On hover, expands an animated dropdown showing ALL upcoming events.
 // Updates every 15 seconds via setInterval for a smooth live countdown.
@@ -66,7 +66,7 @@ class NextEventCountdown extends React.Component {
   }
 
   /**
-   * _getActiveEvent — Finds any currently active event.
+   * _getActiveEvent — Finds any currently active (timed) event.
    * Returns the active event or null.
    */
   _getActiveEvent() {
@@ -74,7 +74,7 @@ class NextEventCountdown extends React.Component {
     if (!events || events.length === 0) return null;
     const now = this.state.now;
     return events
-      .filter((e) => !e.isPreview)
+      .filter((e) => !e.isPreview && !e.allDay)
       .find((e) => {
         const s = new Date(e.start);
         const en = new Date(e.end);
@@ -83,14 +83,15 @@ class NextEventCountdown extends React.Component {
   }
 
   /**
-   * _getUpcomingEvents — Returns all upcoming (future) events sorted by start time.
+   * _getUpcomingEvents — Returns all upcoming (future) timed events sorted by start time.
+   * All-day events are left out: a countdown to midnight isn't useful.
    */
   _getUpcomingEvents() {
     const { events } = this.props;
     if (!events || events.length === 0) return [];
     const now = this.state.now;
     return events
-      .filter((e) => !e.isPreview && new Date(e.start) > now)
+      .filter((e) => !e.isPreview && !e.allDay && new Date(e.start) > now)
       .sort((a, b) => new Date(a.start) - new Date(b.start));
   }
 
@@ -138,7 +139,6 @@ class NextEventCountdown extends React.Component {
       return h(
         "div",
         { className: "next-event-countdown idle" },
-        h("span", { className: "next-event-icon" }, "✨"),
         h("span", { className: "next-event-label" }, "No upcoming events")
       );
     }
@@ -174,12 +174,7 @@ class NextEventCountdown extends React.Component {
             : `${primaryEvent.title} at ${primaryStart.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}`,
         },
         (isActive || urgency === "critical") && h("span", { className: "next-event-pulse" }),
-        h("span", { className: "next-event-icon" },
-          isActive ? "🔴"
-            : urgency === "critical" ? "⚡"
-            : urgency === "high" ? "🔔"
-            : "⏳"
-        ),
+        h("span", { className: "next-event-dot" }),
         h(
           "div",
           { className: "next-event-info" },

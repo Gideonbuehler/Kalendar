@@ -135,7 +135,7 @@ class CalendarSettingsModal extends React.Component {
         React.createElement(
           "div",
           { className: "modal-header" },
-          React.createElement("h2", null, "⚙️ Calendar Settings"),
+          React.createElement("h2", null, "Calendar Settings"),
           React.createElement(
             "div",
             { className: "calendar-name-preview" },
@@ -168,7 +168,7 @@ class CalendarSettingsModal extends React.Component {
               className: `tab ${activeTab === "general" ? "active" : ""}`,
               onClick: () => this.setState({ activeTab: "general" }),
             },
-            "🎨 General"
+            "General"
           ),
           //Sharing tab temporarily disabled - requires Nextcloud-specific configuration
           React.createElement(
@@ -177,7 +177,7 @@ class CalendarSettingsModal extends React.Component {
               className: `tab ${activeTab === "sharing" ? "active" : ""}`,
               onClick: () => this.setState({ activeTab: "sharing" }),
             },
-            "👥 Sharing"
+            "Sharing"
           )
         ),
 
@@ -256,7 +256,7 @@ class CalendarSettingsModal extends React.Component {
                 React.createElement(
                   "p",
                   { style: { fontSize: "0.85rem", color: "var(--text-tertiary)", marginBottom: "0.5rem" } },
-                  "⚠️ This action cannot be undone. The calendar will be permanently deleted."
+                  "This action cannot be undone. The calendar will be permanently deleted."
                 ),
                 React.createElement(
                   "button",
@@ -265,7 +265,7 @@ class CalendarSettingsModal extends React.Component {
                     onClick: this.handleDeleteCalendar,
                     style: { width: "100%", marginTop: "0.5rem" },
                   },
-                  "🗑️ Delete Calendar"
+                  "Delete Calendar"
                 )
               )
             ),
@@ -360,8 +360,8 @@ class CalendarSettingsModal extends React.Component {
                               "span",
                               { className: "share-permission" },
                               share.permission === "write"
-                                ? "✏️ Can edit"
-                                : "👁️ Can view"
+                                ? "Can edit"
+                                : "Can view"
                             )
                           ),
                           React.createElement(
@@ -372,7 +372,7 @@ class CalendarSettingsModal extends React.Component {
                                 this.handleRemoveShare(share.id || index),
                               title: "Remove share",
                             },
-                            "🗑️"
+                            "Remove"
                           )
                         )
                       )

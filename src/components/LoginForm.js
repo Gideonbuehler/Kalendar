@@ -32,7 +32,7 @@ class LoginForm extends React.Component {
           h(
             "h1",
             { className: "app-title" },
-            h("span", { className: "logo-icon" }, "."),
+            h("span", { className: "logo-icon" }, kalIcon("calendar", { size: 36 })),
             "Kalendar"
           ),
           h(
@@ -47,7 +47,6 @@ class LoginForm extends React.Component {
           h(
             "div",
             { className: "error-message" },
-            h("span", { className: "error-icon" }, "⚠️"),
             errorMessage
           ),
 

@@ -406,8 +406,9 @@ class TaskManager extends React.Component {
                                   }
                                 },
                                 title: "Add to calendar",
+                                "aria-label": "Add to calendar",
                               },
-                              "📅"
+                              kalIcon("calendar", { size: 13 })
                             ),
                             h(
                               "button",
@@ -454,11 +455,6 @@ class TaskManager extends React.Component {
             },
             h(
               "div",
-              { className: "task-confirm-icon" },
-              this.state.confirmDelete.type === "list" ? "🗑️" : "⚠️"
-            ),
-            h(
-              "div",
               { className: "task-confirm-title" },
               this.state.confirmDelete.type === "list"
                 ? "Delete task list?"
@@ -468,8 +464,8 @@ class TaskManager extends React.Component {
               "div",
               { className: "task-confirm-message" },
               this.state.confirmDelete.type === "list"
-                ? `"${this.state.confirmDelete.name}" and ${this.state.confirmDelete.taskCount === 1 ? "its 1 task" : "all " + this.state.confirmDelete.taskCount + " tasks"} will be permanently deleted.`
-                : `"${this.state.confirmDelete.name}" will be permanently deleted.`
+                ? `"${this.state.confirmDelete.name}" and ${this.state.confirmDelete.taskCount === 1 ? "its 1 task" : "all " + this.state.confirmDelete.taskCount + " tasks"} will be permanently deleted, along with any calendar events scheduled from them.`
+                : `"${this.state.confirmDelete.name}" will be permanently deleted, along with any calendar events scheduled from it.`
             ),
             h(
               "div",

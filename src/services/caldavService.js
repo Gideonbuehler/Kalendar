@@ -25,7 +25,306 @@ const dav = require("dav");
 const ICAL = require("ical.js");
 const https = require("https");
 const http = require("http");
+const crypto = require("crypto");
 const { URL } = require("url");
+
+// Recurring events are expanded into individual occurrences within this window
+// (relative to "now"). Non-recurring events are always returned regardless of date.
+const RECURRENCE_PAST_DAYS = 365;
+const RECURRENCE_FUTURE_DAYS = 730;
+const MAX_OCCURRENCES_PER_EVENT = 1500;
+const MAX_RECURRENCE_ITERATIONS = 50000;
+const REQUEST_TIMEOUT_MS = 30000;
+
+// ── XML / iCalendar helpers ─────────────────────────────────────────────
+
+/**
+ * decodeXmlText — Turns the text content of an XML element back into plain text.
+ * Servers escape calendar-data inside their XML responses (e.g. "&amp;", "&#13;"),
+ * which must be undone before the iCalendar parser sees it.
+ */
+function decodeXmlText(text) {
+  const cdata = text.match(/^\s*<!\[CDATA\[([\s\S]*?)\]\]>\s*$/);
+  if (cdata) return cdata[1];
+  return text
+    .replace(/&#x([0-9a-f]+);/gi, (_, hex) => String.fromCodePoint(parseInt(hex, 16)))
+    .replace(/&#(\d+);/g, (_, dec) => String.fromCodePoint(parseInt(dec, 10)))
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&amp;/g, "&");
+}
+
+/**
+ * parseMultistatus — Splits a WebDAV multistatus body into its <response> entries.
+ * Works with any namespace prefix (Nextcloud uses "d:"/"cal:", other servers use
+ * default namespaces). Returns [{ href, props: { localName: text } }].
+ */
+function parseMultistatus(xml, propNames) {
+  const results = [];
+  const responseRe = /<(?:[\w-]+:)?response\b[^>]*>([\s\S]*?)<\/(?:[\w-]+:)?response>/gi;
+  const pick = (body, tag) => {
+    const re = new RegExp(
+      `<(?:[\\w-]+:)?${tag}\\b[^>]*?(?:/>|>([\\s\\S]*?)</(?:[\\w-]+:)?${tag}>)`,
+      "i"
+    );
+    const m = body.match(re);
+    return m && m[1] != null ? decodeXmlText(m[1].trim()) : null;
+  };
+  let match;
+  while ((match = responseRe.exec(xml))) {
+    const body = match[1];
+    const props = {};
+    for (const name of propNames) props[name] = pick(body, name);
+    results.push({ href: pick(body, "href"), props });
+  }
+  return results;
+}
+
+/** Normalizes a collection URL for comparisons (decoded path, trailing slash). */
+function collectionKey(url) {
+  try {
+    let path = decodeURIComponent(new URL(url).pathname);
+    if (!path.endsWith("/")) path += "/";
+    return path;
+  } catch (e) {
+    return url;
+  }
+}
+
+/** Nextcloud stores colors as "#RRGGBBAA"; the UI (and <input type=color>) wants "#RRGGBB". */
+function normalizeColor(color) {
+  if (!color) return null;
+  const m = color.trim().match(/^#([0-9a-f]{6})([0-9a-f]{2})?$/i);
+  return m ? `#${m[1]}` : color.trim();
+}
+
+/** Registers every VTIMEZONE in a VCALENDAR so TZID-based times convert correctly. */
+function registerTimezones(vcalendar) {
+  for (const vtz of vcalendar.getAllSubcomponents("vtimezone")) {
+    try {
+      const tz = new ICAL.Timezone(vtz);
+      if (tz.tzid && !ICAL.TimezoneService.has(tz.tzid)) {
+        ICAL.TimezoneService.register(tz.tzid, tz);
+      }
+    } catch (e) {
+      console.warn("Skipping invalid VTIMEZONE:", e.message);
+    }
+  }
+}
+
+/**
+ * toICALTime — Converts a JS Date into an ICAL.Time.
+ * All-day values become DATE values (local calendar day). Timed values keep the
+ * timezone style of `like` (the value being replaced) so that recurring events
+ * keep their TZID and stay at the same wall-clock time across DST changes.
+ * New values without a template are written in UTC.
+ */
+function toICALTime(jsDate, allDay, like) {
+  const date = new Date(jsDate);
+  if (allDay) {
+    return ICAL.Time.fromData({
+      year: date.getFullYear(),
+      month: date.getMonth() + 1,
+      day: date.getDate(),
+      isDate: true,
+    });
+  }
+  if (like && !like.isDate && like.zone) {
+    if (like.zone === ICAL.Timezone.localTimezone) {
+      return ICAL.Time.fromJSDate(date, false);
+    }
+    if (like.zone !== ICAL.Timezone.utcTimezone && like.zone.tzid) {
+      return ICAL.Time.fromJSDate(date, true).convertToZone(like.zone);
+    }
+  }
+  return ICAL.Time.fromJSDate(date, true);
+}
+
+/**
+ * setTimeProperty — Writes an ICAL.Time into a DTSTART/DTEND/RECURRENCE-ID
+ * property, setting VALUE=DATE and TZID parameters to match the value.
+ */
+function setTimeProperty(component, name, time) {
+  let prop = component.getFirstProperty(name);
+  if (!prop) {
+    prop = new ICAL.Property(name);
+    component.addProperty(prop);
+  }
+  writeTimeValue(prop, time);
+}
+
+/** Sets a property's value to an ICAL.Time along with matching VALUE/TZID parameters. */
+function writeTimeValue(prop, time) {
+  const previousTzid = prop.getParameter("tzid");
+  prop.removeParameter("tzid");
+  prop.resetType(time.isDate ? "date" : "date-time");
+  prop.setValue(time);
+
+  const zone = time.zone;
+  if (!time.isDate && zone && zone !== ICAL.Timezone.utcTimezone) {
+    if (zone !== ICAL.Timezone.localTimezone && zone.tzid) {
+      prop.setParameter("tzid", zone.tzid);
+    } else if (previousTzid && !ICAL.TimezoneService.has(previousTzid)) {
+      // Unknown TZID (no VTIMEZONE): we treated it as local time when reading,
+      // so keep the TZID and write local wall-clock time back.
+      prop.setParameter("tzid", previousTzid);
+    }
+  }
+}
+
+/** Adds `seconds` of wall-clock time (whole days for DATE values) to a time property. */
+function shiftTimeProperty(prop, seconds) {
+  const values = prop.getValues();
+  if (!values.every((value) => value instanceof ICAL.Time)) return; // e.g. RDATE periods
+  const shifted = values.map((value) => {
+    const t = value.clone();
+    const step = t.isDate ? Math.round(seconds / 86400) * 86400 : seconds;
+    t.addDuration(ICAL.Duration.fromSeconds(step));
+    return t;
+  });
+  if (prop.isMultiValue) {
+    prop.setValues(shifted);
+  } else {
+    prop.setValue(shifted[0]);
+  }
+}
+
+/** The RECURRENCE-ID of an exception VEVENT as epoch milliseconds. */
+function recurrenceIdMs(vevent) {
+  const value = vevent.getFirstPropertyValue("recurrence-id");
+  return value ? value.toJSDate().getTime() : null;
+}
+
+/** Marks a VEVENT as modified (DTSTAMP, LAST-MODIFIED, SEQUENCE). */
+function touchEvent(vevent) {
+  const now = ICAL.Time.fromJSDate(new Date(), true);
+  vevent.updatePropertyWithValue("dtstamp", now);
+  vevent.updatePropertyWithValue("last-modified", now);
+  const sequence = parseInt(vevent.getFirstPropertyValue("sequence"), 10) || 0;
+  vevent.updatePropertyWithValue("sequence", sequence + 1);
+}
+
+/** Sets a text property, removing it entirely when the new value is empty. */
+function setTextProperty(vevent, name, value) {
+  if (value) {
+    vevent.updatePropertyWithValue(name, value);
+  } else {
+    vevent.removeAllProperties(name);
+  }
+}
+
+/**
+ * applyEventChanges — Applies edited fields from the UI to a VEVENT.
+ * Times keep the timezone style of the values they replace.
+ */
+function applyEventChanges(vevent, eventData) {
+  if (eventData.title !== undefined) setTextProperty(vevent, "summary", eventData.title);
+  if (eventData.description !== undefined) setTextProperty(vevent, "description", eventData.description);
+  if (eventData.location !== undefined) setTextProperty(vevent, "location", eventData.location);
+
+  const oldStart = vevent.getFirstPropertyValue("dtstart");
+  const oldEnd = vevent.getFirstPropertyValue("dtend") || oldStart;
+  const allDay =
+    eventData.allDay !== undefined ? !!eventData.allDay : !!(oldStart && oldStart.isDate);
+  if (eventData.start) {
+    setTimeProperty(vevent, "dtstart", toICALTime(eventData.start, allDay, oldStart));
+  }
+  if (eventData.end) {
+    vevent.removeAllProperties("duration");
+    setTimeProperty(vevent, "dtend", toICALTime(eventData.end, allDay, oldEnd));
+  }
+  touchEvent(vevent);
+}
+
+/**
+ * createException — Builds the VEVENT that overrides one occurrence of a series:
+ * a copy of the master (including alarms) without recurrence rules, pinned to
+ * the occurrence via RECURRENCE-ID.
+ */
+function createException(master, recurrenceTime) {
+  const exception = new ICAL.Component("vevent");
+  const skip = new Set(["rrule", "rdate", "exdate", "dtstart", "dtend", "duration", "recurrence-id"]);
+  for (const prop of master.getAllProperties()) {
+    if (!skip.has(prop.name)) {
+      exception.addProperty(new ICAL.Property(JSON.parse(JSON.stringify(prop.toJSON()))));
+    }
+  }
+  for (const sub of master.getAllSubcomponents()) {
+    exception.addSubcomponent(new ICAL.Component(JSON.parse(JSON.stringify(sub.toJSON()))));
+  }
+  const end = recurrenceTime.clone();
+  end.addDuration(new ICAL.Event(master).duration);
+  setTimeProperty(exception, "recurrence-id", recurrenceTime);
+  setTimeProperty(exception, "dtstart", recurrenceTime.clone());
+  setTimeProperty(exception, "dtend", end);
+  return exception;
+}
+
+/**
+ * updateSeries — Applies an edit to every occurrence of a recurring event.
+ * A time change is applied as a wall-clock shift of the series start (so a
+ * 9:00 meeting moved to 10:00 stays at 10:00 across DST), and EXDATEs and
+ * overridden occurrences are shifted along so they keep matching the series.
+ */
+function updateSeries(master, exceptions, eventData, originalStart) {
+  const masterEvent = new ICAL.Event(master);
+  const textOnly = {
+    title: eventData.title,
+    description: eventData.description,
+    location: eventData.location,
+  };
+  applyEventChanges(master, textOnly);
+
+  if (!eventData.start || !eventData.end || !originalStart) return;
+
+  const newStart = new Date(eventData.start).getTime();
+  const deltaSeconds = Math.round((newStart - new Date(originalStart).getTime()) / 1000);
+  const durationSeconds = Math.round((new Date(eventData.end).getTime() - newStart) / 1000);
+
+  const start = masterEvent.startDate.clone();
+  const step = start.isDate ? Math.round(deltaSeconds / 86400) * 86400 : deltaSeconds;
+  start.addDuration(ICAL.Duration.fromSeconds(step));
+  const end = start.clone();
+  end.addDuration(
+    ICAL.Duration.fromSeconds(
+      start.isDate ? Math.max(1, Math.round(durationSeconds / 86400)) * 86400 : durationSeconds
+    )
+  );
+  setTimeProperty(master, "dtstart", start);
+  master.removeAllProperties("duration");
+  setTimeProperty(master, "dtend", end);
+
+  if (step !== 0) {
+    master.getAllProperties("exdate").forEach((prop) => shiftTimeProperty(prop, step));
+    master.getAllProperties("rdate").forEach((prop) => shiftTimeProperty(prop, step));
+    exceptions.forEach((ex) => {
+      ex.getAllProperties("recurrence-id").forEach((prop) => shiftTimeProperty(prop, step));
+    });
+  }
+}
+
+/** Finds the occurrence of a recurring master event whose start equals `targetMs`. */
+function findOccurrenceTime(masterEvent, targetMs) {
+  const iterator = masterEvent.iterator();
+  let next;
+  let guard = 0;
+  while ((next = iterator.next()) && guard++ < MAX_RECURRENCE_ITERATIONS) {
+    const ms = next.toJSDate().getTime();
+    if (ms === targetMs) return next;
+    if (ms > targetMs) break;
+  }
+  return null;
+}
+
+/** Splits a VCALENDAR's VEVENTs into the master and its RECURRENCE-ID exceptions. */
+function splitEvents(vcalendar) {
+  const vevents = vcalendar.getAllSubcomponents("vevent");
+  const master = vevents.find((v) => !v.hasProperty("recurrence-id")) || null;
+  const exceptions = vevents.filter((v) => v.hasProperty("recurrence-id"));
+  return { vevents, master, exceptions };
+}
 
 /**
  * CalDAVService — Singleton service for all server-side calendar operations.
@@ -50,33 +349,37 @@ class CalDAVService {
       const client = isHttps ? https : http;
 
       const auth = Buffer.from(`${username}:${password}`).toString("base64");
+      const body = data ? Buffer.from(data, "utf8") : null;
 
       const options = {
         hostname: parsedUrl.hostname,
         port: parsedUrl.port || (isHttps ? 443 : 80),
-        path: parsedUrl.pathname,
+        path: parsedUrl.pathname + parsedUrl.search,
         method: method,
         headers: {
           Authorization: `Basic ${auth}`,
+          ...(body ? { "Content-Length": body.length } : {}),
           ...headers,
         },
         rejectUnauthorized: false, // Allow self-signed certificates
       };
 
-      console.log(`📡 Making ${method} request to:`, parsedUrl.pathname);
+      console.log(`Making ${method} request to:`, parsedUrl.pathname);
 
       const req = client.request(options, (res) => {
-        let responseData = "";
+        // Collect raw chunks and decode once, so multi-byte characters
+        // (umlauts, emoji) that straddle chunk boundaries aren't corrupted
+        const chunks = [];
 
         res.on("data", (chunk) => {
-          responseData += chunk;
+          chunks.push(chunk);
         });
 
         res.on("end", () => {
+          const responseData = Buffer.concat(chunks).toString("utf8");
           console.log(
-            `✅ Response status: ${res.statusCode} ${res.statusMessage}`
+            `Response status: ${res.statusCode} ${res.statusMessage}`
           );
-          console.log(`📦 Response length: ${responseData.length} bytes`);
 
           resolve({
             status: res.statusCode,
@@ -87,13 +390,18 @@ class CalDAVService {
         });
       });
 
+      // Don't let a hung server leave the UI waiting forever
+      req.setTimeout(REQUEST_TIMEOUT_MS, () => {
+        req.destroy(new Error("Request timed out (ETIMEDOUT)"));
+      });
+
       req.on("error", (error) => {
-        console.error(`❌ Request error:`, error);
+        console.error(`Request error:`, error);
         reject(error);
       });
 
-      if (data) {
-        req.write(data);
+      if (body) {
+        req.write(body);
       }
 
       req.end();
@@ -150,23 +458,29 @@ class CalDAVService {
       this.serverUrl = normalizedUrl;
       this.credentials = { username, password };
 
-      console.log("Connected successfully, calendars:", account.calendars);
+      // The dav library doesn't load calendar colors, so fetch them separately
+      const colors = await this.fetchCalendarColors(
+        username,
+        password,
+        account.homeUrl
+      );
 
-      // Log detailed information about all calendars
-      if (account.calendars && account.calendars.length > 0) {
-        account.calendars.forEach((cal, index) => {
-          console.log(`Calendar ${index}:`, {
-            displayName: cal.displayName,
-            url: cal.url,
-            components: cal.components,
-            isTasksCalendar: cal.components && cal.components.includes("VTODO"),
-            isEventsCalendar:
-              cal.components && cal.components.includes("VEVENT"),
-          });
-        });
-      }
+      // Return plain objects (the dav objects carry back-references to the account)
+      const calendars = (account.calendars || []).map((cal) => ({
+        url: cal.url,
+        displayName: cal.displayName,
+        description: cal.description,
+        components: cal.components || [],
+        ctag: cal.ctag,
+        color: colors[collectionKey(cal.url)] || null,
+      }));
 
-      return { success: true, calendars: account.calendars };
+      console.log(
+        "Connected successfully, calendars:",
+        calendars.map((c) => `${c.displayName} [${c.components.join(",")}]`)
+      );
+
+      return { success: true, calendars, homeUrl: account.homeUrl };
     } catch (error) {
       console.error("CalDAV connection error:", error);
 
@@ -210,6 +524,128 @@ class CalDAVService {
       return { success: false, error: userMessage };
     }
   }
+
+  /**
+   * fetchCalendarColors — PROPFINDs the calendar home for Apple's calendar-color
+   * property. Returns { collectionKey: "#rrggbb" }. Failures are non-fatal.
+   */
+  async fetchCalendarColors(username, password, homeUrl) {
+    const colors = {};
+    if (!homeUrl) return colors;
+    try {
+      const response = await this.makeRequest(
+        "PROPFIND",
+        homeUrl,
+        `<?xml version="1.0" encoding="utf-8" ?>
+<D:propfind xmlns:D="DAV:" xmlns:I="http://apple.com/ns/ical/">
+  <D:prop><I:calendar-color/></D:prop>
+</D:propfind>`,
+        { "Content-Type": "application/xml; charset=utf-8", Depth: "1" },
+        username,
+        password
+      );
+      if (response.status >= 200 && response.status < 300) {
+        for (const entry of parseMultistatus(response.body, ["calendar-color"])) {
+          const color = normalizeColor(entry.props["calendar-color"]);
+          if (entry.href && color) {
+            colors[collectionKey(new URL(entry.href, homeUrl).toString())] = color;
+          }
+        }
+      }
+    } catch (error) {
+      console.warn("Could not load calendar colors:", error.message);
+    }
+    return colors;
+  }
+
+  /**
+   * parseCalendarObject — Converts one calendar object resource (.ics) into
+   * display events. Recurring events are expanded into one entry per occurrence
+   * (honouring EXDATEs and moved/changed occurrences), all-day events are flagged,
+   * and TZID times are converted using the resource's VTIMEZONE definitions.
+   *
+   * Each event carries `url` (the resource to PUT/DELETE) and, for occurrences
+   * of a series, `recurrenceId` (the occurrence's original start in epoch ms).
+   */
+  parseCalendarObject(icsText, resourceUrl, etag) {
+    const vcalendar = new ICAL.Component(ICAL.parse(icsText));
+    registerTimezones(vcalendar);
+
+    const { vevents, master, exceptions } = splitEvents(vcalendar);
+    if (vevents.length === 0) return [];
+
+    const build = (item, startTime, endTime, recurrenceId, recurring) => {
+      const allDay = !!startTime.isDate;
+      const start = startTime.toJSDate();
+      let end = endTime ? endTime.toJSDate() : start;
+      if (end <= start) {
+        // Zero-length events: all-day spans one day, timed events get a visible 30 min
+        end = allDay
+          ? new Date(start.getFullYear(), start.getMonth(), start.getDate() + 1)
+          : new Date(start.getTime() + 30 * 60000);
+      }
+      return {
+        id: recurrenceId != null ? `${resourceUrl}#${recurrenceId}` : resourceUrl,
+        uid: item.uid,
+        url: resourceUrl,
+        etag: etag || null,
+        title: item.summary || "Untitled Event",
+        start,
+        end,
+        allDay,
+        description: item.description || "",
+        location: item.location || "",
+        recurring,
+        recurrenceId,
+      };
+    };
+
+    // A resource containing only overridden instances (e.g. an invitation to a
+    // single occurrence): show each instance on its own
+    if (!master) {
+      return exceptions.map((vevent) => {
+        const ev = new ICAL.Event(vevent);
+        return build(ev, ev.startDate, ev.endDate, null, false);
+      });
+    }
+
+    const masterEvent = new ICAL.Event(master);
+    exceptions.forEach((ex) => masterEvent.relateException(ex));
+
+    if (!masterEvent.isRecurring()) {
+      return [build(masterEvent, masterEvent.startDate, masterEvent.endDate, null, false)];
+    }
+
+    const now = Date.now();
+    const rangeStart = now - RECURRENCE_PAST_DAYS * 86400000;
+    const rangeEnd = now + RECURRENCE_FUTURE_DAYS * 86400000;
+    const occurrences = [];
+    const iterator = masterEvent.iterator();
+    let next;
+    let guard = 0;
+    while (
+      (next = iterator.next()) &&
+      guard++ < MAX_RECURRENCE_ITERATIONS &&
+      occurrences.length < MAX_OCCURRENCES_PER_EVENT
+    ) {
+      const details = masterEvent.getOccurrenceDetails(next);
+      const startMs = details.startDate.toJSDate().getTime();
+      const endMs = details.endDate.toJSDate().getTime();
+      if (next.toJSDate().getTime() > rangeEnd) break;
+      if (endMs < rangeStart || startMs > rangeEnd) continue;
+      occurrences.push(
+        build(
+          details.item,
+          details.startDate,
+          details.endDate,
+          details.recurrenceId.toJSDate().getTime(),
+          true
+        )
+      );
+    }
+    return occurrences;
+  }
+
   /**
    * fetchEvents — Retrieves all VEVENT items from a calendar.
    * Sends a CalDAV REPORT request with a calendar-query filter,
@@ -223,7 +659,7 @@ class CalDAVService {
       }
 
       const targetUrl = calendar ? calendar.url : calendarUrl;
-      console.log("📥 Fetching events from:", targetUrl);
+      console.log("Fetching events from:", targetUrl);
 
       // Check if this is a tasks calendar
       if (calendar && calendar.components) {
@@ -233,7 +669,7 @@ class CalDAVService {
           !calendar.components.includes("VEVENT")
         ) {
           console.warn(
-            "⚠️ WARNING: This is a tasks calendar (VTODO), not an events calendar (VEVENT)!"
+            "WARNING: This is a tasks calendar (VTODO), not an events calendar (VEVENT)!"
           );
           console.warn(
             "No events will be found. Please select a calendar that supports events."
@@ -242,14 +678,9 @@ class CalDAVService {
         }
       }
 
-      const xhr = this.createXHR(username, password);
-
-      // Simplified approach: Use dav.request to get calendar objects directly
-      console.log("Using REPORT query to fetch VEVENT components...");
       const events = [];
 
       try {
-        // Use raw HTTP request instead of dav.request.basic
         const reportXml = `<?xml version="1.0" encoding="utf-8" ?>
 <C:calendar-query xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:caldav">
   <D:prop>
@@ -279,84 +710,46 @@ class CalDAVService {
           password
         );
 
-        console.log("✅ REPORT response:", {
-          status: response.status,
-          statusText: response.statusText,
-          bodyLength: response.body ? response.body.length : 0,
-        });
-
-        // Log the raw response for debugging
-        if (response.body && response.body.length > 0) {
-          console.log(
-            "📄 Raw XML response (first 1000 chars):",
-            response.body.substring(0, 1000)
+        if (response.status < 200 || response.status >= 300) {
+          throw new Error(
+            `Server returned status ${response.status}: ${response.statusText}`
           );
-        } else if (response.xhr && response.xhr.responseText) {
-          console.log("📄 Using XHR responseText instead...");
-          response.body = response.xhr.responseText;
-        } else {
-          console.log("⚠️ Empty response body from server");
-        } // Simple regex parsing instead of DOMParser (works in Node.js)
-        if (response && response.body) {
-          // Match calendar-data with any namespace prefix (C:, cal:, etc.)
-          const calendarDataMatches = response.body.match(
-            /<[^:]+:calendar-data[^>]*>([\s\S]*?)<\/[^:]+:calendar-data>/gi
-          );
+        }
 
-          console.log(
-            `Found ${
-              calendarDataMatches ? calendarDataMatches.length : 0
-            } calendar-data elements`
-          );
+        // Each <response> holds one .ics resource: its href (needed to update or
+        // delete it later — it is NOT always "<UID>.ics") and its calendar data
+        const entries = parseMultistatus(response.body || "", [
+          "getetag",
+          "calendar-data",
+        ]);
 
-          if (calendarDataMatches) {
-            for (const match of calendarDataMatches) {
-              try {
-                // Extract the actual calendar data (remove tags with any namespace)
-                const calendarData = match
-                  .replace(/<[^:]+:calendar-data[^>]*>/i, "")
-                  .replace(/<\/[^:]+:calendar-data>/i, "")
-                  .trim();
-
-                if (
-                  calendarData &&
-                  calendarData.startsWith("BEGIN:VCALENDAR")
-                ) {
-                  console.log("📄 Processing calendar data...");
-
-                  const jcalData = ICAL.parse(calendarData);
-                  const comp = new ICAL.Component(jcalData);
-                  const vevent = comp.getFirstSubcomponent("vevent");
-
-                  if (vevent) {
-                    const event = new ICAL.Event(vevent);
-                    const parsedEvent = {
-                      id: event.uid,
-                      title: event.summary || "Untitled Event",
-                      start: event.startDate.toJSDate(),
-                      end: event.endDate.toJSDate(),
-                      description: event.description || "",
-                      location: event.location || "",
-                    };
-                    console.log("✅ Parsed event:", parsedEvent);
-                    events.push(parsedEvent);
-                  }
-                }
-              } catch (parseError) {
-                console.error("❌ Error parsing individual event:", parseError);
-              }
-            }
+        for (const entry of entries) {
+          const calendarData = entry.props["calendar-data"];
+          if (!entry.href || !calendarData || !calendarData.includes("BEGIN:VCALENDAR")) {
+            continue;
+          }
+          try {
+            const resourceUrl = new URL(entry.href, targetUrl).toString();
+            events.push(
+              ...this.parseCalendarObject(
+                calendarData,
+                resourceUrl,
+                entry.props.getetag
+              )
+            );
+          } catch (parseError) {
+            console.error(`Error parsing ${entry.href}:`, parseError.message);
           }
         }
       } catch (queryError) {
-        console.error("❌ Calendar query failed:", queryError);
+        console.error("Calendar query failed:", queryError);
         throw queryError;
       }
 
-      console.log(`🎉 Successfully fetched ${events.length} events`);
+      console.log(`Successfully fetched ${events.length} events`);
       return { success: true, events };
     } catch (error) {
-      console.error("❌ Fetch events error:", error);
+      console.error("Fetch events error:", error);
       return { success: false, error: error.message || String(error) };
     }
   }
@@ -391,8 +784,6 @@ class CalDAVService {
         );
       }
 
-      const xhr = this.createXHR(username, password);
-
       const comp = new ICAL.Component(["vcalendar", [], []]);
       comp.updatePropertyWithValue("prodid", "-//Kalendar//EN");
       comp.updatePropertyWithValue("version", "2.0");
@@ -400,22 +791,17 @@ class CalDAVService {
       const vevent = new ICAL.Component("vevent");
       const event = new ICAL.Event(vevent);
 
+      event.uid = crypto.randomUUID();
       event.summary = eventData.title;
+      const now = ICAL.Time.fromJSDate(new Date(), true);
+      vevent.updatePropertyWithValue("dtstamp", now);
+      vevent.updatePropertyWithValue("created", now);
 
-      // Create dates - use local time zone instead of UTC
-      const startDate = new Date(eventData.start);
-      const endDate = new Date(eventData.end);
-
-      console.log("Converting dates:", {
-        originalStart: eventData.start,
-        originalEnd: eventData.end,
-        jsDateStart: startDate,
-        jsDateEnd: endDate,
-      });
-
-      // Use false for timezone to create floating time (local time)
-      event.startDate = ICAL.Time.fromJSDate(startDate, false);
-      event.endDate = ICAL.Time.fromJSDate(endDate, false);
+      // Timed events are stored in UTC; all-day events as DATE values with an
+      // exclusive end date (eventData.end is the midnight after the last day)
+      const allDay = !!eventData.allDay;
+      setTimeProperty(vevent, "dtstart", toICALTime(eventData.start, allDay));
+      setTimeProperty(vevent, "dtend", toICALTime(eventData.end, allDay));
 
       if (eventData.description) {
         event.description = eventData.description;
@@ -424,26 +810,15 @@ class CalDAVService {
         event.location = eventData.location;
       }
 
-      event.uid = `${Date.now()}@kalendar-app`;
       comp.addSubcomponent(vevent);
 
       const calendarData = comp.toString();
-
-      console.log("=== EVENT CREATION DEBUG ===");
-      console.log("Event UID:", event.uid);
-      console.log("Event Title:", eventData.title);
-      console.log("Event Start:", eventData.start);
-      console.log("Event End:", eventData.end);
-      console.log("Calendar URL:", calendar ? calendar.url : calendarUrl);
-      console.log("Full iCalendar data:");
-      console.log(calendarData);
-      console.log("=== END DEBUG ==="); // Use dav.request for more control over the HTTP request
-      const targetUrl = calendar ? calendar.url : calendarUrl;
+      let targetUrl = calendar ? calendar.url : calendarUrl;
+      if (!targetUrl.endsWith("/")) targetUrl += "/";
       const eventUrl = `${targetUrl}${event.uid}.ics`;
 
-      console.log("Full event URL:", eventUrl);
+      console.log("Creating event at:", eventUrl);
 
-      // Use raw HTTP request instead of dav.request.basic
       const response = await this.makeRequest(
         "PUT",
         eventUrl,
@@ -456,17 +831,13 @@ class CalDAVService {
         password
       );
 
-      console.log("✅ PUT response:", {
-        status: response.status,
-        statusText: response.statusText,
-      });
-      if (response.status >= 200 && response.status < 300) {
-        console.log("🎉 Event creation confirmed - HTTP", response.status);
-      } else {
-        console.warn("⚠️ Unexpected response status:", response.status);
+      if (response.status < 200 || response.status >= 300) {
+        throw new Error(
+          `Server returned status ${response.status}: ${response.statusText}`
+        );
       }
 
-      return { success: true, eventId: event.uid };
+      return { success: true, eventId: event.uid, eventUrl };
     } catch (error) {
       console.error("Create event error:", error);
 
@@ -493,34 +864,108 @@ class CalDAVService {
   }
 
   /**
-   * deleteEvent — Removes an event from the server by sending HTTP DELETE
-   * to the event's .ics URL (calendarUrl + eventId + ".ics").
+   * resolveEventUrl — The URL of an event's .ics resource. Uses the href the
+   * server reported when fetching (other clients don't name files "<UID>.ics"),
+   * falling back to "<calendar>/<UID>.ics" for events Kalendar created itself.
    */
-  async deleteEvent(username, password, calendarUrl, eventId) {
-    try {
-      console.log("Deleting event:", {
-        calendarUrl,
-        eventId,
-      });
+  resolveEventUrl(calendarUrl, eventId, eventUrl) {
+    if (eventUrl) return eventUrl;
+    const base = calendarUrl.endsWith("/") ? calendarUrl : `${calendarUrl}/`;
+    return `${base}${eventId}.ics`;
+  }
 
-      // Validate inputs
+  /** GETs and parses an event resource. Returns { vcalendar, etag }. */
+  async loadEventResource(username, password, eventUrl) {
+    const response = await this.makeRequest(
+      "GET",
+      eventUrl,
+      null,
+      { Accept: "text/calendar" },
+      username,
+      password
+    );
+    if (response.status < 200 || response.status >= 300) {
+      throw new Error(
+        `Failed to fetch event: HTTP ${response.status} ${response.statusText}`
+      );
+    }
+    if (!response.body || !response.body.includes("BEGIN:VCALENDAR")) {
+      throw new Error("Invalid calendar data received from server");
+    }
+    const vcalendar = new ICAL.Component(ICAL.parse(response.body));
+    registerTimezones(vcalendar);
+    return { vcalendar, etag: response.headers.etag || null };
+  }
+
+  /**
+   * saveEventResource — PUTs a modified resource back. The ETag from
+   * loadEventResource guards against overwriting a change made elsewhere
+   * in the meantime.
+   */
+  async saveEventResource(username, password, eventUrl, vcalendar, etag) {
+    const headers = { "Content-Type": "text/calendar; charset=utf-8" };
+    if (etag && !etag.startsWith("W/")) headers["If-Match"] = etag;
+    const response = await this.makeRequest(
+      "PUT",
+      eventUrl,
+      vcalendar.toString(),
+      headers,
+      username,
+      password
+    );
+    if (response.status === 412) {
+      throw new Error(
+        "The event was changed on the server in the meantime. Please refresh and try again."
+      );
+    }
+    if (response.status < 200 || response.status >= 300) {
+      throw new Error(
+        `Server returned status ${response.status}: ${response.statusText}`
+      );
+    }
+  }
+
+  /**
+   * deleteEvent — Removes an event from the server.
+   * With options.recurrenceId, only that occurrence of a recurring event is
+   * removed (by adding an EXDATE to the series); otherwise the whole .ics
+   * resource is deleted.
+   */
+  async deleteEvent(username, password, calendarUrl, eventId, options = {}) {
+    try {
       if (!username || !password) {
         throw new Error("Missing credentials. Please log in again.");
       }
-
-      if (!calendarUrl) {
+      if (!calendarUrl && !options.eventUrl) {
         throw new Error("No calendar URL provided.");
       }
-
-      if (!eventId) {
+      if (!eventId && !options.eventUrl) {
         throw new Error("No event ID provided.");
       }
 
-      // Construct the event URL
-      const eventUrl = `${calendarUrl}${eventId}.ics`;
-      console.log("Full event URL for deletion:", eventUrl);
+      const eventUrl = this.resolveEventUrl(calendarUrl, eventId, options.eventUrl);
+      console.log("Deleting event:", eventUrl, options.recurrenceId != null ? `(occurrence ${options.recurrenceId})` : "");
 
-      // Use raw HTTP request to delete the event
+      if (options.recurrenceId != null) {
+        const { vcalendar, etag } = await this.loadEventResource(username, password, eventUrl);
+        const { master, exceptions } = splitEvents(vcalendar);
+        if (master && new ICAL.Event(master).isRecurring()) {
+          // Drop any modified copy of this occurrence, then exclude it from the series
+          exceptions
+            .filter((ex) => recurrenceIdMs(ex) === options.recurrenceId)
+            .forEach((ex) => vcalendar.removeSubcomponent(ex));
+          const occurrence = findOccurrenceTime(new ICAL.Event(master), options.recurrenceId);
+          if (occurrence) {
+            const exdate = new ICAL.Property("exdate", master);
+            writeTimeValue(exdate, occurrence);
+            master.addProperty(exdate);
+          }
+          touchEvent(master);
+          await this.saveEventResource(username, password, eventUrl, vcalendar, etag);
+          return { success: true };
+        }
+      }
+
       const response = await this.makeRequest(
         "DELETE",
         eventUrl,
@@ -530,30 +975,21 @@ class CalDAVService {
         password
       );
 
-      console.log("✅ DELETE response:", {
-        status: response.status,
-        statusText: response.statusText,
-      });
-
-      if (response.status >= 200 && response.status < 300) {
-        console.log("🎉 Event deleted successfully - HTTP", response.status);
+      // 404 means it's already gone, which is what the user wanted
+      if ((response.status >= 200 && response.status < 300) || response.status === 404) {
         return { success: true };
-      } else {
-        console.warn("⚠️ Unexpected response status:", response.status);
-        return {
-          success: false,
-          error: `Server returned status ${response.status}`,
-        };
       }
+      return {
+        success: false,
+        error: `Server returned status ${response.status}`,
+      };
     } catch (error) {
       console.error("Delete event error:", error);
 
       // Provide more user-friendly error messages
       let errorMessage = error.message || String(error);
 
-      if (errorMessage.includes("404")) {
-        errorMessage = "Event not found. It may have already been deleted.";
-      } else if (errorMessage.includes("401") || errorMessage.includes("403")) {
+      if (errorMessage.includes("401") || errorMessage.includes("403")) {
         errorMessage = "Authentication failed. Please check your credentials.";
       } else if (
         errorMessage.includes("network") ||
@@ -572,107 +1008,53 @@ class CalDAVService {
    * Flow: GET the existing .ics → parse with ical.js → update fields → PUT back.
    * This preserves any server-side properties (alarms, attendees, etc.)
    * that Kalendar doesn't manage.
+   *
+   * For an occurrence of a recurring event (options.recurrenceId):
+   *   - scope "occurrence" (default): only that occurrence changes; it is stored
+   *     as an exception (a VEVENT with RECURRENCE-ID) inside the same resource
+   *   - scope "series": the whole series changes; a time change is applied as the
+   *     difference between options.originalStart and eventData.start
    */
-  async updateEvent(username, password, calendarUrl, eventId, eventData) {
+  async updateEvent(username, password, calendarUrl, eventId, eventData, options = {}) {
     try {
-      console.log("Updating event:", { calendarUrl, eventId, eventData });
-
       if (!username || !password) {
         throw new Error("Missing credentials. Please log in again.");
       }
-      if (!calendarUrl || !eventId) {
+      if ((!calendarUrl || !eventId) && !options.eventUrl) {
         throw new Error("Missing calendar URL or event ID.");
       }
 
-      // Step 1: Fetch the existing event to get its full iCalendar data
-      const eventUrl = `${calendarUrl}${eventId}.ics`;
-      console.log("Fetching existing event from:", eventUrl);
+      const eventUrl = this.resolveEventUrl(calendarUrl, eventId, options.eventUrl);
+      console.log("Updating event:", eventUrl, options.scope || "", options.recurrenceId || "");
 
-      const getResponse = await this.makeRequest(
-        "GET",
-        eventUrl,
-        null,
-        { Accept: "text/calendar" },
-        username,
-        password
-      );
-
-      if (getResponse.status < 200 || getResponse.status >= 300) {
-        throw new Error(
-          `Failed to fetch event: HTTP ${getResponse.status} ${getResponse.statusText}`
-        );
-      }
-
-      // Step 2: Parse the existing iCalendar data
-      let calendarData = getResponse.body;
-      if (!calendarData || !calendarData.includes("BEGIN:VCALENDAR")) {
-        throw new Error("Invalid calendar data received from server");
-      }
-
-      const jcalData = ICAL.parse(calendarData);
-      const comp = new ICAL.Component(jcalData);
-      const vevent = comp.getFirstSubcomponent("vevent");
-
-      if (!vevent) {
+      const { vcalendar, etag } = await this.loadEventResource(username, password, eventUrl);
+      const { vevents, master, exceptions } = splitEvents(vcalendar);
+      if (vevents.length === 0) {
         throw new Error("No VEVENT found in calendar data");
       }
 
-      const event = new ICAL.Event(vevent);
+      const isOccurrence =
+        options.recurrenceId != null && master && new ICAL.Event(master).isRecurring();
 
-      // Step 3: Update the event properties
-      if (eventData.start) {
-        event.startDate = ICAL.Time.fromJSDate(
-          new Date(eventData.start),
-          false
-        );
-      }
-      if (eventData.end) {
-        event.endDate = ICAL.Time.fromJSDate(new Date(eventData.end), false);
-      }
-      if (eventData.title !== undefined) {
-        event.summary = eventData.title;
-      }
-      if (eventData.description !== undefined) {
-        event.description = eventData.description;
-      }
-      if (eventData.location !== undefined) {
-        event.location = eventData.location;
-      }
-
-      const updatedCalendarData = comp.toString();
-
-      console.log("=== EVENT UPDATE DEBUG ===");
-      console.log("Event UID:", event.uid);
-      console.log("New Start:", eventData.start);
-      console.log("New End:", eventData.end);
-      console.log("=== END DEBUG ===");
-
-      // Step 4: PUT the updated event back (overwrite existing)
-      const putResponse = await this.makeRequest(
-        "PUT",
-        eventUrl,
-        updatedCalendarData,
-        {
-          "Content-Type": "text/calendar; charset=utf-8",
-        },
-        username,
-        password
-      );
-
-      console.log("✅ PUT response:", {
-        status: putResponse.status,
-        statusText: putResponse.statusText,
-      });
-
-      if (putResponse.status >= 200 && putResponse.status < 300) {
-        console.log("🎉 Event updated successfully - HTTP", putResponse.status);
-        return { success: true };
+      if (isOccurrence && options.scope === "series") {
+        updateSeries(master, exceptions, eventData, options.originalStart);
+      } else if (isOccurrence) {
+        let target = exceptions.find((ex) => recurrenceIdMs(ex) === options.recurrenceId);
+        if (!target) {
+          const occurrence = findOccurrenceTime(new ICAL.Event(master), options.recurrenceId);
+          if (!occurrence) {
+            throw new Error("This occurrence no longer exists on the server. Please refresh.");
+          }
+          target = createException(master, occurrence);
+          vcalendar.addSubcomponent(target);
+        }
+        applyEventChanges(target, eventData);
       } else {
-        return {
-          success: false,
-          error: `Server returned status ${putResponse.status}: ${putResponse.statusText}`,
-        };
+        applyEventChanges(master || vevents[0], eventData);
       }
+
+      await this.saveEventResource(username, password, eventUrl, vcalendar, etag);
+      return { success: true };
     } catch (error) {
       console.error("Update event error:", error);
       return { success: false, error: error.message || String(error) };
@@ -689,7 +1071,8 @@ class CalDAVService {
     password,
     serverUrl,
     calendarName,
-    calendarColor
+    calendarColor,
+    homeUrl
   ) {
     try {
       console.log("Creating calendar:", {
@@ -711,9 +1094,15 @@ class CalDAVService {
         "-" +
         Date.now();
 
-      // Construct the calendar URL
-      const normalizedUrl = this.normalizeServerUrl(serverUrl);
-      const calendarUrl = `${normalizedUrl}/calendars/${username}/${calendarId}/`;
+      // Construct the calendar URL inside the user's calendar home (discovered at
+      // login); fall back to Nextcloud's standard layout
+      let calendarHome = homeUrl;
+      if (!calendarHome) {
+        const normalizedUrl = this.normalizeServerUrl(serverUrl);
+        calendarHome = `${normalizedUrl}/calendars/${encodeURIComponent(username)}/`;
+      }
+      if (!calendarHome.endsWith("/")) calendarHome += "/";
+      const calendarUrl = `${calendarHome}${calendarId}/`;
 
       console.log("Calendar URL:", calendarUrl);
 
@@ -723,7 +1112,7 @@ class CalDAVService {
   <D:set>
     <D:prop>
       <D:displayname>${this.escapeXml(calendarName)}</D:displayname>
-      <I:calendar-color>${calendarColor}</I:calendar-color>
+      <I:calendar-color>${this.escapeXml(calendarColor || "#5e72e4")}</I:calendar-color>
       <C:supported-calendar-component-set>
         <C:comp name="VEVENT"/>
       </C:supported-calendar-component-set>
@@ -742,16 +1131,16 @@ class CalDAVService {
         password
       );
 
-      console.log("✅ MKCALENDAR response:", {
+      console.log("MKCALENDAR response:", {
         status: response.status,
         statusText: response.statusText,
       });
 
       if (response.status >= 200 && response.status < 300) {
-        console.log("🎉 Calendar created successfully - HTTP", response.status);
+        console.log("Calendar created successfully - HTTP", response.status);
         return { success: true, calendarUrl: calendarUrl };
       } else {
-        console.warn("⚠️ Unexpected response status:", response.status);
+        console.warn("Unexpected response status:", response.status);
         return {
           success: false,
           error: `Server returned status ${response.status}: ${response.statusText}`,
@@ -812,16 +1201,16 @@ class CalDAVService {
         password
       );
 
-      console.log("✅ PROPPATCH response:", {
+      console.log("PROPPATCH response:", {
         status: response.status,
         statusText: response.statusText,
       });
 
       if (response.status >= 200 && response.status < 300) {
-        console.log("🎨 Calendar color updated successfully");
+        console.log("Calendar color updated successfully");
         return { success: true };
       } else {
-        console.warn("⚠️ Unexpected response status:", response.status);
+        console.warn("Unexpected response status:", response.status);
         return {
           success: false,
           error: `Server returned status ${response.status}: ${response.statusText}`,
@@ -869,16 +1258,16 @@ class CalDAVService {
         password
       );
 
-      console.log("✅ PROPPATCH response:", {
+      console.log("PROPPATCH response:", {
         status: response.status,
         statusText: response.statusText,
       });
 
       if (response.status >= 200 && response.status < 300) {
-        console.log("📝 Calendar name updated successfully");
+        console.log("Calendar name updated successfully");
         return { success: true };
       } else {
-        console.warn("⚠️ Unexpected response status:", response.status);
+        console.warn("Unexpected response status:", response.status);
         return {
           success: false,
           error: `Server returned status ${response.status}: ${response.statusText}`,
@@ -945,14 +1334,14 @@ class CalDAVService {
         password
       );
 
-      console.log("✅ Share response:", {
+      console.log("Share response:", {
         status: response.status,
         statusText: response.statusText,
         body: response.body ? response.body.substring(0, 500) : "",
       });
 
       if (response.status >= 200 && response.status < 300) {
-        console.log("👥 Calendar shared successfully with:", shareWithEmail);
+        console.log("Calendar shared successfully with:", shareWithEmail);
         return {
           success: true,
           share: {
@@ -962,7 +1351,7 @@ class CalDAVService {
           },
         };
       } else {
-        console.warn("⚠️ Share response status:", response.status);
+        console.warn("Share response status:", response.status);
         let errorMessage = `Server returned status ${response.status}: ${response.statusText}`;
 
         // Try to parse error from XML response
@@ -1021,7 +1410,7 @@ class CalDAVService {
       if (response.status >= 200 && response.status < 300) {
         // Parse ACL from response
         // This is simplified - real implementation would parse XML response
-        console.log("📋 Calendar shares fetched");
+        console.log("Calendar shares fetched");
         return { success: true, shares: [] };
       } else {
         return {
@@ -1075,7 +1464,7 @@ class CalDAVService {
       );
 
       if (response.status >= 200 && response.status < 300) {
-        console.log("🗑️ Calendar share removed successfully");
+        console.log("Calendar share removed successfully");
         return { success: true };
       } else {
         return {
@@ -1130,16 +1519,16 @@ class CalDAVService {
         password
       );
 
-      console.log("✅ DELETE calendar response:", {
+      console.log("DELETE calendar response:", {
         status: response.status,
         statusText: response.statusText,
       });
 
       if (response.status >= 200 && response.status < 300) {
-        console.log("🎉 Calendar deleted successfully - HTTP", response.status);
+        console.log("Calendar deleted successfully - HTTP", response.status);
         return { success: true };
       } else {
-        console.warn("⚠️ Unexpected response status:", response.status);
+        console.warn("Unexpected response status:", response.status);
         return {
           success: false,
           error: `Server returned status ${response.status}: ${response.statusText}`,

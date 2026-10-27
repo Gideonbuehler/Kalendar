@@ -17,8 +17,11 @@ A beautiful, highly customizable desktop calendar application for Nextcloud buil
 - **Multiple Views** - Month, Week, Day, and Agenda views
 - **Event Creation & Editing** - Create events with title, time, location, and description
 - **Multiple Calendars** - Support for multiple Nextcloud calendars with color-coded display
-- **Real-time Sync** - Sync events with your Nextcloud server via CalDAV
-- **Drag & Drop** - Reschedule events by dragging, drop tasks onto the calendar
+- **Real-time Sync** - Sync events with your Nextcloud server via CalDAV; refreshes in the background every 5 minutes and when the window regains focus
+- **Drag & Drop** - Move events by dragging them, resize them by dragging their bottom edge, drop tasks onto the calendar
+- **Recurring Events** - Repeating events show every occurrence; move, edit or delete a single occurrence or the whole series
+- **All-day Events** - Shown in the all-day row; create them by clicking a day in month view
+- **Works With Any Client** - Events created on your phone or in the Nextcloud web UI can be edited and deleted too, and times in other time zones are converted correctly
 - **Week Numbers** - Optional week number display
 - **Customizable First Day** - Start week on Sunday or Monday
 - **Time Formats** - Choose between 12-hour and 24-hour formats
@@ -107,7 +110,7 @@ The app will automatically append the CalDAV path (`/remote.php/dav`) to your se
 
 ## Settings
 
-Access settings by clicking the gear icon (⚙️) in the header.
+Access settings by clicking the gear icon in the header.
 
 ### Appearance Settings
 
@@ -148,22 +151,47 @@ For better security, create an App Password in Nextcloud:
 - The calendar displays all events from your Nextcloud calendars
 - Use the navigation buttons to switch between months/weeks/days
 - Change views using the Month/Week/Day/Agenda buttons
-- Toggle individual calendars on/off in the sidebar
+- Toggle individual calendars on/off in the sidebar (remembered between sessions)
+- Click an event to see its details (time, calendar, location, description)
 
 ### Creating Events
 
-1. Click and drag on the calendar to select a time slot
+1. Click "+ New event" (or press `N`), click a time slot, or drag across a range.
+   Clicking a day in month view creates an all-day event.
 2. Fill in the event details (title, time, location, description)
 3. Select which calendar to add it to
-4. Click "Create"
+4. Click "Create" (or press `Ctrl+Enter`)
+
+### Changing Events
+
+- **Move**: drag the event to a new time or day
+- **Resize**: drag the bottom edge of the event (week/day view)
+- **Edit**: double-click the event, or click it and choose "Edit Event"
+- **Delete**: click the event and choose "Delete", use the Delete button in the edit dialog, or `Alt`+Click
+- **Recurring events**: dragging changes only that occurrence. The edit dialog lets you
+  apply changes to "This occurrence" or "All occurrences", and the event menu offers
+  "Delete This Occurrence" and "Delete All Occurrences".
+
+### Keyboard Shortcuts
+
+| Key | Action |
+| --- | --- |
+| `N` | New event |
+| `T` | Jump to today |
+| `Esc` | Close the open dialog or menu |
+| `Ctrl+Enter` | Save the event dialog |
+| `Alt`+Click | Delete an event |
 
 ### Managing Tasks
 
 1. Click "+" in the Tasks section to create a new task list
 2. Expand a list and click "+" to add tasks
 3. Check tasks to mark them as complete
-4. Drag tasks onto the calendar to schedule them
-5. Delete tasks or lists with the ✕ button (with confirmation)
+4. Drag tasks onto the calendar to schedule them, or click the calendar button on a task
+5. Delete tasks or lists with the ✕ button (with confirmation); calendar events
+   scheduled from them are removed too
+
+Task lists are saved on this computer; they are not synced to Nextcloud yet.
 
 ### Building for Production
 
@@ -177,10 +205,12 @@ This will create distributable packages in the `dist` folder.
 
 - **Electron** - Desktop app framework
 - **React** - UI library
-- **react-big-calendar** - Calendar component
+- **react-big-calendar** - Calendar component (with its drag-and-drop addon)
 - **dav** - CalDAV/CardDAV client library
 - **ical.js** - iCalendar format parsing
 - **moment.js** - Date handling
+
+All libraries are loaded from `node_modules` (no CDN), so the app also starts without internet access.
 
 ## Troubleshooting
 
@@ -196,6 +226,7 @@ This will create distributable packages in the `dist` folder.
 - Click the "Refresh" button to manually sync
 - Check that the correct calendars are toggled on in the sidebar
 - Verify events exist in the Nextcloud web interface
+- Occurrences of recurring events are shown from one year in the past to two years ahead
 
 ## Security Notes
 

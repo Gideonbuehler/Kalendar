@@ -41,18 +41,25 @@ class DayTimeline extends React.Component {
     );
   }
 
-  /** Filters and sorts events for the selected day. Excludes preview events. */
+  /**
+   * Filters and sorts events for the selected day (all-day events first).
+   * Timed events count on the day they start; all-day events on every day
+   * they cover. Excludes preview events.
+   */
   _getTodayEvents() {
     const { events, selectedDate } = this.props;
     if (!events) return [];
     const target = selectedDate || new Date();
+    const dayStart = new Date(target.getFullYear(), target.getMonth(), target.getDate());
+    const dayEnd = new Date(target.getFullYear(), target.getMonth(), target.getDate() + 1);
     return events
       .filter((e) => {
         if (e.isPreview) return false;
+        if (e.allDay) return new Date(e.start) < dayEnd && new Date(e.end) > dayStart;
         const start = new Date(e.start);
         return this._isSameDay(start, target);
       })
-      .sort((a, b) => new Date(a.start) - new Date(b.start));
+      .sort((a, b) => (b.allDay ? 1 : 0) - (a.allDay ? 1 : 0) || new Date(a.start) - new Date(b.start));
   }
 
   /** Returns a gradient color based on time of day (warm→cool palette). */
@@ -103,7 +110,6 @@ class DayTimeline extends React.Component {
         h(
           "div",
           { className: "day-timeline-empty" },
-          h("span", { className: "day-timeline-empty-icon" }, "🌤️"),
           h("span", null, "Clear schedule")
         )
       );
@@ -113,6 +119,7 @@ class DayTimeline extends React.Component {
     let startHour = 6;
     let endHour = 23;
     todayEvents.forEach((ev) => {
+      if (ev.allDay) return;
       const sh = new Date(ev.start).getHours();
       const eh = new Date(ev.end).getHours();
       if (sh < startHour) startHour = Math.max(0, sh);
@@ -163,8 +170,8 @@ class DayTimeline extends React.Component {
             }
             return null;
           })(),
-        // Event blocks
-        todayEvents.map((ev, idx) => {
+        // Event blocks (all-day events are only listed below)
+        todayEvents.filter((ev) => !ev.allDay).map((ev, idx) => {
           const evStart = new Date(ev.start);
           const evEnd = new Date(ev.end);
           const startMin = evStart.getHours() * 60 + evStart.getMinutes();
@@ -208,7 +215,7 @@ class DayTimeline extends React.Component {
             h(
               "div",
               { className: "day-timeline-list-text" },
-              h("span", { className: "day-timeline-list-time" }, this._formatTime(evStart)),
+              h("span", { className: "day-timeline-list-time" }, ev.allDay ? "All day" : this._formatTime(evStart)),
               h("span", { className: "day-timeline-list-title" }, ev.title)
             )
           );

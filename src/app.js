@@ -12,15 +12,32 @@ const { ipcRenderer } = require("electron");
 const { Component } = React;
 
 // React Big Calendar — the core calendar rendering library
-const { Calendar } = ReactBigCalendar;
 const { momentLocalizer } = ReactBigCalendar;
-
-// Optional drag-and-drop support (loaded from CDN, may not be present)
-const { DragDropContext } = window.ReactDnD || {};
-const { HTML5Backend } = window.ReactDnDHTML5Backend || {};
 
 // Initialize the Moment.js-based localizer for react-big-calendar
 const localizer = momentLocalizer(moment);
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+const AUTO_REFRESH_MS = 5 * 60 * 1000; // Background sync interval
+const FOCUS_REFRESH_GAP_MS = 60 * 1000; // Min. time between syncs on window focus
+const NOTICE_TIMEOUT_MS = 6000;
+const TASKS_STORAGE_KEY = "kalendar.taskLists";
+
+// Factory defaults for user preferences (credentials are stored separately)
+const DEFAULT_SETTINGS = {
+  theme: "light",
+  primaryColor: "#5e72e4",
+  accentColor: "#11cdef",
+  fontSize: "medium",
+  firstDayOfWeek: 0,
+  timeFormat: "12h",
+  defaultView: "month",
+  showWeekNumbers: false,
+  compactMode: false,
+  animations: true,
+  defaultTaskDuration: 15, // minutes
+  hiddenCalendars: [], // URLs of calendars unchecked in the sidebar
+};
 
 /**
  * Debounce helper — delays invoking `fn` until `wait` ms have elapsed
@@ -41,22 +58,106 @@ function debounce(fn, wait) {
   };
 }
 
-// Check if DnD is available
-const withDragAndDrop = ReactBigCalendar.withDragAndDrop || ((comp) => comp);
+/** Example task lists shown on first launch, before the user has saved any. */
+function defaultTaskLists() {
+  const now = new Date().toISOString();
+  return [
+    {
+      id: "1",
+      name: "Comp350",
+      tasks: [
+        { id: "t1", name: "homework1", completed: false, createdAt: now },
+        { id: "t2", name: "homework2", completed: true, createdAt: now },
+        { id: "t3", name: "project-draft", completed: false, createdAt: now },
+      ],
+      createdAt: now,
+    },
+    {
+      id: "2",
+      name: "Shopping",
+      tasks: [
+        { id: "t4", name: "Buy groceries", completed: false, createdAt: now },
+        { id: "t5", name: "Pick up package", completed: false, createdAt: now },
+      ],
+      createdAt: now,
+    },
+  ];
+}
+
+/** Task lists are kept in localStorage so they survive restarts. */
+function loadTaskLists() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(TASKS_STORAGE_KEY));
+    if (Array.isArray(saved)) return saved;
+  } catch (e) {
+    console.error("Failed to load task lists:", e);
+  }
+  return defaultTaskLists();
+}
+
+function newId() {
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function startOfDay(date) {
+  const d = new Date(date);
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+
+function addDays(date, days) {
+  const d = new Date(date);
+  d.setDate(d.getDate() + days);
+  return d;
+}
+
+function isMidnight(date) {
+  return (
+    date.getHours() === 0 &&
+    date.getMinutes() === 0 &&
+    date.getSeconds() === 0 &&
+    date.getMilliseconds() === 0
+  );
+}
+
+/** Turns low-level network errors into a message people can act on. */
+function friendlyError(message) {
+  if (/ECONNREFUSED|ENOTFOUND|EAI_AGAIN|ETIMEDOUT|ECONNRESET|ENETUNREACH|timed out/i.test(message || "")) {
+    return "Can't reach the server. Check your internet connection and try again.";
+  }
+  return message || "unknown error";
+}
+
+/** Marks events scheduled from a task (see handleTaskDroppedOnCalendar). */
+function isTaskEvent(event) {
+  return !!(event.description && event.description.includes("Task from list:"));
+}
+
+/**
+ * applyWeekStart — Makes Moment (and therefore react-big-calendar and the
+ * week numbers) start weeks on Sunday (0) or Monday (1, ISO week numbering).
+ */
+function applyWeekStart(firstDayOfWeek) {
+  const dow = firstDayOfWeek === 1 ? 1 : 0;
+  moment.updateLocale("en", { week: { dow, doy: dow === 1 ? 4 : 6 } });
+}
 
 /**
  * KalendarApp — The root component of the application.
  *
  * State is organized into the following sections:
  *   - Authentication: connection status, server URL, credentials
- *   - Calendar Data: calendars list, selected calendars, events cache
- *   - UI State: modal visibility flags, loading indicators, errors
+ *   - Calendar Data: calendars list, selected calendars, events per calendar
+ *   - UI State: modal visibility flags, loading indicators, notices
  *   - Event Creation/Editing: form data for the event modal
- *   - Tasks: local task lists (future: synced via CalDAV VTODO)
+ *   - Tasks: local task lists (persisted in localStorage)
  *   - Settings: theme, colors, font size, calendar preferences
  *
- * All server communication is done through Electron IPC → main.js → caldavService.
- * UI updates use an optimistic pattern: update state immediately, then sync to server.
+ * Events live in one place, `allCalendarEvents` (keyed by calendar URL); the
+ * events shown are derived from it and the checked calendars. All server
+ * communication is done through Electron IPC → main.js → caldavService.
+ * UI updates are optimistic: state changes immediately, then the calendar is
+ * reloaded from the server, which confirms the change or reverts it.
  */
 class KalendarApp extends Component {
   constructor(props) {
@@ -66,18 +167,16 @@ class KalendarApp extends Component {
       isConnected: false,
       serverUrl: "",
       username: "",
-      password: "", // Calendar Data
+      password: "",
+      homeUrl: null, // Calendar home collection (where new calendars are created)
+
+      // Calendar Data
       calendars: [],
-      calendarUrl: "",
-      selectedCalendar: null, // Store the actual calendar object
-      selectedCalendarIds: [], // Array of selected calendar URLs for multi-calendar view
-      events: [],
-      allCalendarEvents: {}, // Store events per calendar: { calendarUrl: [...events] }
+      selectedCalendarIds: [], // URLs of calendars checked in the sidebar
+      allCalendarEvents: {}, // { calendarUrl: [...events] } incl. optimistic changes
       currentDate: new Date(), // Current date for calendar navigation
 
-      // Drag state for moving events
-      draggingEvent: null,
-      isDragging: false, // UI State
+      // UI State
       showLoginForm: true,
       showEventModal: false,
       showCreateCalendarModal: false,
@@ -85,90 +184,47 @@ class KalendarApp extends Component {
       selectedCalendarForSettings: null,
       showSettings: false,
       isLoading: false,
-      isCreatingEvent: false,
       errorMessage: "",
+      notice: null, // { id, text, type } — transient message at the bottom
 
-      // Context Menu
+      // Context Menu (event details popover)
       contextMenu: {
         visible: false,
         x: 0,
         y: 0,
         event: null,
-      }, // Event Creation
+      },
+
+      // Event Creation / Editing
       newEvent: {
         title: "",
         start: new Date(),
         end: new Date(),
+        allDay: false,
         description: "",
         location: "",
-        calendarUrl: "", // Will be set to first calendar by default
-      }, // Editing Event
+        calendarUrl: "",
+      },
       editingEvent: null,
-      isEditMode: false, // Tasks
-      taskLists: [
-        {
-          id: "1",
-          name: "Comp350",
-          tasks: [
-            {
-              id: "t1",
-              name: "homework1",
-              completed: false,
-              createdAt: new Date().toISOString(),
-            },
-            {
-              id: "t2",
-              name: "homework2",
-              completed: true,
-              createdAt: new Date().toISOString(),
-            },
-            {
-              id: "t3",
-              name: "project-draft",
-              completed: false,
-              createdAt: new Date().toISOString(),
-            },
-          ],
-          createdAt: new Date().toISOString(),
-        },
-        {
-          id: "2",
-          name: "Shopping",
-          tasks: [
-            {
-              id: "t4",
-              name: "Buy groceries",
-              completed: false,
-              createdAt: new Date().toISOString(),
-            },
-            {
-              id: "t5",
-              name: "Pick up package",
-              completed: false,
-              createdAt: new Date().toISOString(),
-            },
-          ],
-          createdAt: new Date().toISOString(),
-        },
-      ],
+      isEditMode: false,
+
+      // Tasks
+      taskLists: loadTaskLists(),
       showTaskManager: false,
       showTaskModal: false,
-      editingTaskListId: null,      editingTask: null, // Settings
-      settings: {
-        theme: "light",
-        primaryColor: "#5e72e4",
-        accentColor: "#11cdef",
-        fontSize: "medium",
-        firstDayOfWeek: 0,
-        timeFormat: "12h",
-        defaultView: "month",
-        showWeekNumbers: false,
-        compactMode: false,
-        animations: true,
-        defaultTaskDuration: 15, // minutes
-      },      // Creative features
+      editingTaskListId: null,
+      editingTask: null,
+
+      // Settings
+      settings: { ...DEFAULT_SETTINGS },
       currentView: "month",
     };
+
+    this._calendarVersions = {}; // Per-calendar change counters (see _bumpCalendar)
+    this._pendingChanges = 0; // Server changes in flight (auto-refresh waits for them)
+    this._lastRefresh = 0;
+    this._lastUsedCalendarUrl = null;
+
     // Debounced settings saver to avoid frequent IPC + disk writes
     this._debouncedSaveSettings = debounce((s) => {
       try {
@@ -178,46 +234,55 @@ class KalendarApp extends Component {
       }
     }, 700);
   }
+
   /**
    * componentDidMount — App initialization sequence:
-   * 1. Register global keyboard shortcut listeners
+   * 1. Register global keyboard shortcuts and background sync
    * 2. Load persisted settings from disk (via main process)
    * 3. Apply theme/color/font settings to the DOM
    * 4. Auto-login if saved credentials exist
    */
   async componentDidMount() {
-    // Global keyboard shortcuts (reserved for future use)
-    this._handleKeyDown = (e) => {};
     document.addEventListener("keydown", this._handleKeyDown);
+
+    // Keep events in sync with changes made on other devices
+    this._refreshTimer = setInterval(this._autoRefresh, AUTO_REFRESH_MS);
+    window.addEventListener("focus", this._handleWindowFocus);
 
     // Load settings from main process (stored in userData/settings.json)
     const result = await ipcRenderer.invoke("get-settings");
     if (result.success) {
-      this.setState({ settings: result.settings }, () => {
+      // Credentials are kept out of `settings` so saving preferences can
+      // never write back credentials that were cleared by logging out
+      const { serverUrl, username, password, ...prefs } = result.settings;
+      const settings = { ...DEFAULT_SETTINGS, ...prefs };
+      this.setState({ settings, currentView: settings.defaultView || "month" }, () => {
         this.applySettings();
       });
 
       // Check for saved credentials
-      if (
-        result.settings.serverUrl &&
-        result.settings.username &&
-        result.settings.password
-      ) {
-        this.setState(
-          {
-            serverUrl: result.settings.serverUrl,
-            username: result.settings.username,
-            password: result.settings.password, // Ideally this should be stored securely
-          },
-          () => {
-            this.handleLoginSubmit({
-              serverUrl: result.settings.serverUrl,
-              username: result.settings.username,
-              password: result.settings.password,
-              rememberMe: true,
-            });
-          }
-        );
+      if (serverUrl && username && password) {
+        this.handleLoginSubmit({ serverUrl, username, password, rememberMe: true });
+      } else if (serverUrl) {
+        this.setState({ serverUrl });
+      }
+    }
+  }
+
+  componentWillUnmount() {
+    document.removeEventListener("keydown", this._handleKeyDown);
+    window.removeEventListener("focus", this._handleWindowFocus);
+    clearInterval(this._refreshTimer);
+    clearTimeout(this._noticeTimer);
+  }
+
+  componentDidUpdate(prevProps, prevState) {
+    // Persist task lists whenever they change
+    if (prevState.taskLists !== this.state.taskLists) {
+      try {
+        localStorage.setItem(TASKS_STORAGE_KEY, JSON.stringify(this.state.taskLists));
+      } catch (e) {
+        console.error("Failed to save task lists:", e);
       }
     }
   }
@@ -249,6 +314,9 @@ class KalendarApp extends Component {
 
     // Apply animations
     root.setAttribute("data-animations", settings.animations);
+
+    // First day of the week (calendar grid, mini calendar and week numbers)
+    applyWeekStart(settings.firstDayOfWeek);
   }
 
   getSystemTheme() {
@@ -258,30 +326,70 @@ class KalendarApp extends Component {
       : "light";
   }
 
+  // ── Keyboard shortcuts & notices ──────────────────────────────────────
+
+  _isAnyModalOpen() {
+    const s = this.state;
+    return (
+      s.showEventModal ||
+      s.showTaskModal ||
+      s.showCalendarSettingsModal ||
+      s.showCreateCalendarModal ||
+      s.showSettings
+    );
+  }
+
+  /**
+   * _handleKeyDown — Global shortcuts:
+   *   Esc closes the topmost dialog or popover, N creates an event,
+   *   T jumps to today. Letter shortcuts are ignored while typing.
+   */
+  _handleKeyDown = (e) => {
+    if (e.key === "Escape") {
+      if (this.state.showEventModal) this._closeEventModal();
+      else if (this.state.showTaskModal) this._closeTaskModal();
+      else if (this.state.showCalendarSettingsModal) this._closeCalendarSettingsModal();
+      else if (this.state.showCreateCalendarModal) this._closeCreateCalendarModal();
+      else if (this.state.showSettings) this._closeSettings();
+      else if (this.state.contextMenu.visible) this.handleCloseContextMenu();
+      return;
+    }
+
+    const target = e.target || {};
+    const tag = (target.tagName || "").toLowerCase();
+    if (tag === "input" || tag === "textarea" || tag === "select" || target.isContentEditable) {
+      return;
+    }
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    if (!this.state.isConnected || this._isAnyModalOpen()) return;
+
+    if (e.key === "n" || e.key === "N") {
+      e.preventDefault();
+      this.handleNewEvent();
+    } else if (e.key === "t" || e.key === "T") {
+      this.handleDateNavigate(new Date());
+    }
+  };
+
+  /** Shows a short, non-blocking message at the bottom of the window. */
+  _notify(text, type = "info") {
+    clearTimeout(this._noticeTimer);
+    this.setState({ notice: { id: Date.now(), text, type } });
+    this._noticeTimer = setTimeout(
+      () => this.setState({ notice: null }),
+      type === "error" ? NOTICE_TIMEOUT_MS * 2 : NOTICE_TIMEOUT_MS
+    );
+  }
+
+  _dismissNotice = () => {
+    clearTimeout(this._noticeTimer);
+    this.setState({ notice: null });
+  };
+
   // Generic input handler — updates top-level state fields by input name
   handleInputChange = (e) => {
     const { name, value } = e.target;
     this.setState({ [name]: value });
-  };
-
-  // Event-specific input handler — updates fields within `newEvent` state object
-  handleEventInputChange = (e) => {
-    const { name, value } = e.target;
-    this.setState((prevState) => ({
-      newEvent: {
-        ...prevState.newEvent,
-        [name]: value,
-      },
-    }));
-  };
-
-  handleEventDateChange = (fieldName, date) => {
-    this.setState((prevState) => ({
-      newEvent: {
-        ...prevState.newEvent,
-        [fieldName]: date,
-      },
-    }));
   };
 
   /**
@@ -290,7 +398,7 @@ class KalendarApp extends Component {
    * Flow:
    * 1. Send credentials to main process via "connect-caldav" IPC
    * 2. On success: save credentials (if rememberMe), store calendars in state
-   * 3. Auto-select all event-capable calendars (VEVENT)
+   * 3. Select all event-capable calendars (VEVENT) except the ones the user hid
    * 4. Fetch events from all selected calendars
    * 5. On failure: display error message, keep login form visible
    */
@@ -313,63 +421,7 @@ class KalendarApp extends Component {
             password: this.state.password,
           });
 
-          if (result.success) {
-
-            // Save credentials if rememberMe is true
-            if (rememberMe) {
-              const settings = {
-                ...this.state.settings,
-                serverUrl: this.state.serverUrl,
-                username: this.state.username,
-                password: this.state.password,
-              };
-              await ipcRenderer.invoke("save-settings", settings);
-            }
-
-            // Set calendars first
-            this.setState({
-              isConnected: true,
-              calendars: result.calendars,
-              isLoading: false,
-              errorMessage: "",
-            });
-            if (result.calendars && result.calendars.length > 0) {
-              // Find the first calendar that supports VEVENT (events), not just VTODO (tasks)
-              const eventsCalendar = result.calendars.find(
-                (cal) => cal.components && cal.components.includes("VEVENT")
-              );
-
-              const firstCalendar = eventsCalendar || result.calendars[0];
-              const calUrl = firstCalendar.url || firstCalendar.href;
-
-              // Get all event calendars (not just tasks)
-              const eventCalendars = result.calendars.filter(
-                (cal) => cal.components && cal.components.includes("VEVENT")
-              );
-
-              // Initialize with all event calendars selected
-              const selectedCalendarIds = eventCalendars.map((cal) => cal.url);
-
-              // Set calendar URL and the full calendar object, then wait for state to update
-              this.setState(
-                {
-                  calendarUrl: calUrl,
-                  selectedCalendar: firstCalendar,
-                  selectedCalendarIds: selectedCalendarIds,
-                  showLoginForm: false,
-                },
-                () => {
-                  this.fetchAllCalendarEvents();
-                }
-              );
-            } else {
-              this.setState({
-                errorMessage: "No calendars found in your account",
-                isLoading: false,
-                showLoginForm: false,
-              });
-            }
-          } else {
+          if (!result.success) {
             // Connection failed - show error but keep the form visible
             this.setState({
               errorMessage:
@@ -377,7 +429,43 @@ class KalendarApp extends Component {
                 "Connection failed. Please check your credentials and try again.",
               isLoading: false,
             });
+            return;
           }
+
+          // Save credentials if rememberMe is true
+          if (rememberMe) {
+            await ipcRenderer.invoke("save-settings", {
+              serverUrl: this.state.serverUrl,
+              username: this.state.username,
+              password: this.state.password,
+            });
+          }
+
+          const calendars = result.calendars || [];
+          const hidden = this.state.settings.hiddenCalendars || [];
+          const selectedCalendarIds = calendars
+            .filter((cal) => cal.components && cal.components.includes("VEVENT"))
+            .map((cal) => cal.url)
+            .filter((url) => !hidden.includes(url));
+
+          this.setState(
+            {
+              isConnected: true,
+              calendars,
+              homeUrl: result.homeUrl || null,
+              selectedCalendarIds,
+              allCalendarEvents: {},
+              showLoginForm: false,
+              isLoading: false,
+              errorMessage: "",
+            },
+            () => {
+              if (calendars.length === 0) {
+                this._notify("No calendars found in your account", "error");
+              }
+              this.fetchAllCalendarEvents();
+            }
+          );
         } catch (error) {
           console.error("Login error:", error);
           this.setState({
@@ -399,413 +487,525 @@ class KalendarApp extends Component {
     });
   };
 
-  /**
-   * fetchEvents — Fetches events from a single calendar.
-   * Used when switching the active calendar. For multi-calendar fetching,
-   * see fetchAllCalendarEvents() below.
-   */
-  fetchEvents = async (calendarUrl) => {
-    this.setState({ isLoading: true });
+  // ── Event data ────────────────────────────────────────────────────────
 
-    const result = await ipcRenderer.invoke("fetch-events", {
-      serverUrl: this.state.serverUrl,
-      username: this.state.username,
-      password: this.state.password,
-      calendar: this.state.selectedCalendar, // Pass the full calendar object
-      calendarUrl: calendarUrl || this.state.calendarUrl,
+  /**
+   * _getVisibleEvents — Events of all checked calendars, with task events
+   * marked completed when their task is checked off. Memoized so components
+   * receive the same array (and skip re-rendering) until something changes.
+   */
+  _getVisibleEvents() {
+    const { allCalendarEvents, selectedCalendarIds, taskLists } = this.state;
+    const cache = this._visibleCache;
+    if (
+      cache &&
+      cache.allCalendarEvents === allCalendarEvents &&
+      cache.selectedCalendarIds === selectedCalendarIds &&
+      cache.taskLists === taskLists
+    ) {
+      return cache.events;
+    }
+
+    const completedTasks = new Set();
+    taskLists.forEach((list) =>
+      list.tasks.forEach((task) => task.completed && completedTasks.add(task.name))
+    );
+
+    let events = [];
+    selectedCalendarIds.forEach((url) => {
+      if (allCalendarEvents[url]) events = events.concat(allCalendarEvents[url]);
     });
-
-    if (result.success) {
-      this.setState({
-        events: result.events,
-        isLoading: false,
-      });
-    } else {
-      console.error("Failed to fetch events:", result.error);
-      this.setState({ isLoading: false });
-      alert("Failed to fetch events: " + result.error);
+    if (completedTasks.size > 0) {
+      events = events.map((ev) =>
+        completedTasks.has(ev.title) && isTaskEvent(ev) ? { ...ev, completed: true } : ev
+      );
     }
-  };
+
+    this._visibleCache = { allCalendarEvents, selectedCalendarIds, taskLists, events };
+    return events;
+  }
+
+  /** Applies `fn` to one calendar's cached event list. */
+  _updateCalendarEvents(calendarUrl, fn) {
+    this.setState((prevState) => ({
+      allCalendarEvents: {
+        ...prevState.allCalendarEvents,
+        [calendarUrl]: fn(prevState.allCalendarEvents[calendarUrl] || []),
+      },
+    }));
+  }
 
   /**
-   * fetchAllCalendarEvents — Fetches events from ALL selected calendars.
-   *
-   * Iterates over selectedCalendarIds, fetches each calendar's events via IPC,
-   * tags each event with its calendarUrl and calendarName (for color-coding),
-   * caches them in allCalendarEvents, and merges into a flat events array.
-   * Preserves any local-only or pending-sync events not yet confirmed by server.
+   * _bumpCalendar — Marks a calendar as changed locally. A fetch that was
+   * already running when the change happened returns outdated data, so its
+   * result is discarded (the change triggers a fresh reload of its own).
    */
-  fetchAllCalendarEvents = async () => {
-    this.setState({ isLoading: true });
+  _bumpCalendar(calendarUrl) {
+    this._calendarVersions[calendarUrl] = (this._calendarVersions[calendarUrl] || 0) + 1;
+  }
 
-    const allCalendarEvents = {};
-    const allEvents = [];
+  /**
+   * loadCalendarEvents — Fetches one calendar's events and replaces its cached
+   * list. Events that were just created locally and aren't on the server yet
+   * are kept. Returns { success, error }.
+   */
+  loadCalendarEvents = async (calendarUrl) => {
+    const calendar = this.state.calendars.find((cal) => cal.url === calendarUrl);
+    if (!calendar) return { success: false, error: "Calendar not found" };
 
-    // Fetch all calendars in parallel instead of sequentially
-    const fetchPromises = this.state.selectedCalendarIds
-      .map((calendarUrl) => {
-        const calendar = this.state.calendars.find(
-          (cal) => cal.url === calendarUrl
-        );
-        if (!calendar) return null;
-        return ipcRenderer
-          .invoke("fetch-events", {
-            serverUrl: this.state.serverUrl,
-            username: this.state.username,
-            password: this.state.password,
-            calendar: calendar,
-            calendarUrl: calendarUrl,
-          })
-          .then((result) => ({ result, calendarUrl, calendar }));
-      })
-      .filter(Boolean);
-
-    const results = await Promise.all(fetchPromises);
-
-    for (const { result, calendarUrl, calendar } of results) {
-      if (result.success) {
-        const taggedEvents = result.events.map((event) => ({
-          ...event,
-          calendarUrl: calendarUrl,
-          calendarName: calendar.displayName,
-        }));
-        allCalendarEvents[calendarUrl] = taggedEvents;
-        allEvents.push(...taggedEvents);
-      }
+    const version = this._calendarVersions[calendarUrl] || 0;
+    let result;
+    try {
+      result = await ipcRenderer.invoke("fetch-events", {
+        serverUrl: this.state.serverUrl,
+        username: this.state.username,
+        password: this.state.password,
+        calendar: calendar,
+        calendarUrl: calendarUrl,
+      });
+    } catch (error) {
+      result = { success: false, error: error.message };
     }
+
+    if (!result.success) {
+      console.error(`Failed to fetch ${calendar.displayName}:`, result.error);
+      return result;
+    }
+    // Stale: the calendar changed while this request was running
+    if ((this._calendarVersions[calendarUrl] || 0) !== version) {
+      return { success: true };
+    }
+
+    const serverEvents = result.events.map((event) => ({
+      ...event,
+      calendarUrl: calendarUrl,
+      calendarName: calendar.displayName,
+    }));
+    const serverUrls = new Set(serverEvents.map((ev) => ev.url));
 
     this.setState((prevState) => {
-      const preservedEvents = prevState.events.filter(
-        (evt) => evt.localOnly || evt.tempId || evt.pendingSync
+      const pending = (prevState.allCalendarEvents[calendarUrl] || []).filter(
+        (ev) => ev._isOptimistic && !(ev.url && serverUrls.has(ev.url))
       );
       return {
-        allCalendarEvents: allCalendarEvents,
-        events: [...allEvents, ...preservedEvents],
-        isLoading: false,
+        allCalendarEvents: {
+          ...prevState.allCalendarEvents,
+          [calendarUrl]: [...serverEvents, ...pending],
+        },
       };
     });
+    return { success: true };
   };
+
   /**
-   * fetchSingleCalendarEvents — Refreshes events for one calendar only.
-   * Much faster than fetchAllCalendarEvents after a single event create/update/delete.
+   * fetchAllCalendarEvents — Refreshes all checked calendars in parallel.
+   * With `silent`, no spinner or error message is shown (background sync).
    */
-  fetchSingleCalendarEvents = async (calendarUrl) => {
-    const calendar = this.state.calendars.find(
-      (cal) => cal.url === calendarUrl
+  fetchAllCalendarEvents = async ({ silent = false } = {}) => {
+    if (!silent) this.setState({ isLoading: true });
+    this._lastRefresh = Date.now();
+
+    const results = await Promise.all(
+      this.state.selectedCalendarIds.map((url) => this.loadCalendarEvents(url))
     );
-    if (!calendar) return;
 
-    const result = await ipcRenderer.invoke("fetch-events", {
-      serverUrl: this.state.serverUrl,
-      username: this.state.username,
-      password: this.state.password,
-      calendar: calendar,
-      calendarUrl: calendarUrl,
-    });
-
-    if (result.success) {
-      const taggedEvents = result.events.map((event) => ({
-        ...event,
-        calendarUrl: calendarUrl,
-        calendarName: calendar.displayName,
-      }));
-
-      this.setState((prevState) => {
-        // Replace only this calendar's events, keep all others
-        const otherEvents = prevState.events.filter(
-          (evt) => evt.calendarUrl !== calendarUrl && !evt._isOptimistic
-        );
-        const preservedEvents = prevState.events.filter(
-          (evt) =>
-            evt.calendarUrl === calendarUrl &&
-            (evt.localOnly || evt.tempId || evt.pendingSync)
-        );
-        return {
-          allCalendarEvents: {
-            ...prevState.allCalendarEvents,
-            [calendarUrl]: taggedEvents,
-          },
-          events: [...otherEvents, ...taggedEvents, ...preservedEvents],
-        };
-      });
-    }
-  };
-
-  /**
-   * handleCalendarToggle — Toggles a calendar's visibility in the multi-calendar view.
-   *
-   * Deselecting: immediately filters out that calendar's events from display.
-   * Selecting: uses cached events for instant display, or fetches from server if uncached.
-   */
-  handleCalendarToggle = async (calendarUrl) => {
-    const { selectedCalendarIds, allCalendarEvents } = this.state;
-    let newSelectedIds;
-
-    if (selectedCalendarIds.includes(calendarUrl)) {
-      // Deselect - immediately filter out events from this calendar
-      newSelectedIds = selectedCalendarIds.filter((id) => id !== calendarUrl);
-      const allEvents = this.state.events.filter(
-        (event) => event.calendarUrl !== calendarUrl
-      );
-      this.setState({
-        selectedCalendarIds: newSelectedIds,
-        events: allEvents,
-      });
-    } else {
-      // Select - immediately add cached events if available
-      newSelectedIds = [...selectedCalendarIds, calendarUrl];
-
-      // Check if we have cached events for this calendar
-      if (allCalendarEvents[calendarUrl]) {
-        // Use cached events for instant display
-        const cachedEvents = allCalendarEvents[calendarUrl];
-        const allEvents = [...this.state.events, ...cachedEvents];
-        this.setState({
-          selectedCalendarIds: newSelectedIds,
-          events: allEvents,
-        });
-      } else {
-        // No cache, need to fetch
-        this.setState({ selectedCalendarIds: newSelectedIds, isLoading: true });
-
-        const calendar = this.state.calendars.find(
-          (cal) => cal.url === calendarUrl
-        );
-
-        if (calendar) {
-          const result = await ipcRenderer.invoke("fetch-events", {
-            serverUrl: this.state.serverUrl,
-            username: this.state.username,
-            password: this.state.password,
-            calendar: calendar,
-            calendarUrl: calendarUrl,
-          });
-
-          if (result.success) {
-            // Tag events with their calendar info
-            const taggedEvents = result.events.map((event) => ({
-              ...event,
-              calendarUrl: calendarUrl,
-              calendarName: calendar.displayName,
-            }));
-
-            // Update cache
-            const updatedCache = {
-              ...this.state.allCalendarEvents,
-              [calendarUrl]: taggedEvents,
-            };
-
-            // Add new events to existing events
-            const allEvents = [...this.state.events, ...taggedEvents];
-
-            this.setState({
-              allCalendarEvents: updatedCache,
-              events: allEvents,
-              isLoading: false,
-            });
-          } else {
-            this.setState({ isLoading: false });
-          }
-        }
+    if (!silent) {
+      this.setState({ isLoading: false });
+      const failed = results.filter((r) => !r.success);
+      if (failed.length > 0) {
+        this._notify(`Couldn't load events: ${friendlyError(failed[0].error)}`, "error");
       }
     }
   };
-  // Opens the event creation modal when the user clicks/drags a time slot
-  handleSelectSlot = ({ start, end }) => {
-    // Get the first available event calendar as default
-    const eventCalendars = this.state.calendars.filter(
-      (cal) => !cal.components || cal.components.includes("VEVENT")
-    );
-    const defaultCalendar =
-      this.state.selectedCalendar?.url ||
-      (eventCalendars.length > 0 ? eventCalendars[0].url : "");
 
+  /** Background sync: periodic, and when the window regains focus. */
+  _autoRefresh = () => {
+    if (!this.state.isConnected || this._pendingChanges > 0 || document.hidden) return;
+    this.fetchAllCalendarEvents({ silent: true });
+  };
+
+  _handleWindowFocus = () => {
+    if (Date.now() - this._lastRefresh > FOCUS_REFRESH_GAP_MS) this._autoRefresh();
+  };
+
+  /**
+   * _syncChange — Runs a server change with an optimistic UI update.
+   * `applyOptimistic` updates the calendar's events immediately; once the server
+   * answers, the calendar is reloaded, which confirms the change or reverts it.
+   */
+  _syncChange = async (calendarUrl, applyOptimistic, serverCall, failureMessage) => {
+    this._bumpCalendar(calendarUrl);
+    this._pendingChanges++;
+    const snapshot = this.state.allCalendarEvents[calendarUrl];
+    if (applyOptimistic) this._updateCalendarEvents(calendarUrl, applyOptimistic);
+
+    let result;
+    try {
+      result = await serverCall();
+    } catch (error) {
+      result = { success: false, error: error.message };
+    }
+    const failed = !result || !result.success;
+
+    this._pendingChanges--;
+    this._bumpCalendar(calendarUrl);
+    if (failed) {
+      // Undo the optimistic change right away; the reload below can't if the
+      // server is unreachable
+      this.setState((prevState) => ({
+        allCalendarEvents: { ...prevState.allCalendarEvents, [calendarUrl]: snapshot },
+      }));
+      this._notify(`${failureMessage}: ${friendlyError(result && result.error)}`, "error");
+    }
+    this.loadCalendarEvents(calendarUrl);
+    return result || { success: false };
+  };
+
+  /**
+   * handleCalendarToggle — Shows or hides a calendar's events.
+   * Showing uses cached events instantly and refreshes them in the background.
+   * The choice is remembered across restarts.
+   */
+  handleCalendarToggle = async (calendarUrl) => {
+    const wasSelected = this.state.selectedCalendarIds.includes(calendarUrl);
+    const selectedCalendarIds = wasSelected
+      ? this.state.selectedCalendarIds.filter((id) => id !== calendarUrl)
+      : [...this.state.selectedCalendarIds, calendarUrl];
+
+    const hiddenCalendars = this.state.calendars
+      .filter((cal) => cal.components && cal.components.includes("VEVENT"))
+      .map((cal) => cal.url)
+      .filter((url) => !selectedCalendarIds.includes(url));
+    this.handleSettingChange("hiddenCalendars", hiddenCalendars);
+
+    if (wasSelected) {
+      this.setState({ selectedCalendarIds });
+      return;
+    }
+
+    const hasCache = !!this.state.allCalendarEvents[calendarUrl];
+    this.setState({ selectedCalendarIds, isLoading: !hasCache || this.state.isLoading });
+    const result = await this.loadCalendarEvents(calendarUrl);
+    if (!hasCache) this.setState({ isLoading: false });
+    if (!result.success) this._notify(`Couldn't load events: ${friendlyError(result.error)}`, "error");
+  };
+
+  // ── Creating events ───────────────────────────────────────────────────
+
+  /** Event calendars the user can create events in. */
+  _getEventCalendars() {
+    return this.state.calendars.filter(
+      (cal) => !cal.components || cal.components.length === 0 || cal.components.includes("VEVENT")
+    );
+  }
+
+  /** Calendar for new events: the last one used, else the first visible one. */
+  _getDefaultCalendarUrl() {
+    const eventCalendars = this._getEventCalendars();
+    const urls = eventCalendars.map((cal) => cal.url);
+    if (this._lastUsedCalendarUrl && urls.includes(this._lastUsedCalendarUrl)) {
+      return this._lastUsedCalendarUrl;
+    }
+    const visible = urls.find((url) => this.state.selectedCalendarIds.includes(url));
+    return visible || urls[0] || "";
+  }
+
+  /** Opens the event modal pre-filled with the given values. */
+  _openNewEventModal(values) {
     this.setState({
       showEventModal: true,
+      isEditMode: false,
+      editingEvent: null,
       newEvent: {
         title: "",
-        start: start,
-        end: end,
         description: "",
         location: "",
-        calendarUrl: defaultCalendar,
+        allDay: false,
+        calendarUrl: this._getDefaultCalendarUrl(),
+        ...values,
       },
     });
-  };
+  }
+
   /**
-   * handleCreateEvent — Creates a new event on the CalDAV server.
-   *
-   * Uses optimistic UI pattern:
-   * 1. Adds a temporary event to state immediately (instant visual feedback)
-   * 2. Sends create-event IPC to main process in background
-   * 3. On success: refreshes from server to get canonical event data
-   * 4. On failure: removes the temporary event and shows an error
+   * handleSelectSlot — Opens the event modal for a clicked/dragged time range.
+   * Day selections (month view, all-day row) create all-day events; a single
+   * click on a time slot creates a one-hour event.
    */
-  handleCreateEvent = async (eventData) => {
-    // eventData comes directly from EventModal's local state
-    const targetCalendarUrl =
-      eventData.calendarUrl || this.state.calendarUrl;
-    if (!targetCalendarUrl) {
-      alert("No calendar selected. Please select a calendar.");
-      return;
+  handleSelectSlot = ({ start, end }) => {
+    start = new Date(start);
+    end = new Date(end);
+    const allDay =
+      this.state.currentView === "month" ||
+      (isMidnight(start) && isMidnight(end) && end > start);
+
+    if (allDay) {
+      start = startOfDay(start);
+      end = startOfDay(end);
+      if (end <= start) end = addDays(start, 1);
+    } else if (end - start <= 15 * 60000) {
+      end = new Date(start.getTime() + 60 * 60000);
     }
 
-    // Find the calendar object that matches the selected URL
-    const targetCalendar = this.state.calendars.find(
-      (cal) => cal.url === targetCalendarUrl
-    );
-    if (!targetCalendar) {
-      alert("Selected calendar not found. Please refresh and try again.");
-      return;
+    this._openNewEventModal({ start, end, allDay });
+  };
+
+  /** "New event" button / N key: next full hour today, or 9:00 on another day. */
+  handleNewEvent = () => {
+    const now = new Date();
+    const day = this.state.currentDate || now;
+    let start;
+    if (startOfDay(day).getTime() === startOfDay(now).getTime()) {
+      start = new Date(now);
+      start.setHours(now.getHours() + 1, 0, 0, 0);
+    } else {
+      start = startOfDay(day);
+      start.setHours(9);
     }
-    // Create temporary event for optimistic UI update
+    this._openNewEventModal({ start, end: new Date(start.getTime() + 60 * 60000) });
+  };
+
+  /**
+   * _createEvent — Creates an event on the server with an optimistic
+   * placeholder that is shown (and dimmed) until the server confirms it.
+   */
+  _createEvent = (eventData) => {
+    const calendarUrl = eventData.calendarUrl;
+    const calendar = this.state.calendars.find((cal) => cal.url === calendarUrl);
+    if (!calendar) {
+      this._notify("Please choose a calendar for the event.", "error");
+      return Promise.resolve({ success: false });
+    }
+    this._lastUsedCalendarUrl = calendarUrl;
+
+    // Make sure the user sees the new event
+    if (!this.state.selectedCalendarIds.includes(calendarUrl)) {
+      this.handleCalendarToggle(calendarUrl);
+    }
+
+    const tempId = `temp-${newId()}`;
+    const payload = {
+      title: eventData.title,
+      start: new Date(eventData.start),
+      end: new Date(eventData.end),
+      allDay: !!eventData.allDay,
+      description: eventData.description || "",
+      location: eventData.location || "",
+    };
     const tempEvent = {
-      ...eventData,
-      id: `temp-${Date.now()}`,
-      calendarUrl: targetCalendarUrl,
-      calendarName: targetCalendar.displayName,
+      ...payload,
+      id: tempId,
+      calendarUrl,
+      calendarName: calendar.displayName,
       _isOptimistic: true,
     };
 
-    // Add to UI immediately
-    this.setState((prevState) => {
-      const newEvents = [...prevState.events, tempEvent];
-      const newAllCalendarEvents = { ...prevState.allCalendarEvents };
-      if (newAllCalendarEvents[targetCalendarUrl]) {
-        newAllCalendarEvents[targetCalendarUrl] = [
-          ...newAllCalendarEvents[targetCalendarUrl],
-          tempEvent,
-        ];
-      } else {
-        newAllCalendarEvents[targetCalendarUrl] = [tempEvent];
-      }
-
-      return {
-        events: newEvents,
-        allCalendarEvents: newAllCalendarEvents,
-        isCreatingEvent: true,
-        showEventModal: false,
-      };
-    });
-
-    // Then create on server
-    const result = await ipcRenderer.invoke("create-event", {
-      serverUrl: this.state.serverUrl,
-      username: this.state.username,
-      password: this.state.password,
-      calendar: targetCalendar,
-      calendarUrl: targetCalendarUrl,
-      eventData: eventData,
-    });
-
-    this.setState({ isCreatingEvent: false });
-
-    if (result.success) {
-      // Replace temporary event with real one from server — only fetch the affected calendar
-      setTimeout(() => {
-        this.fetchSingleCalendarEvents(targetCalendarUrl);
-      }, 500);
-    } else {
-      alert("Failed to create event: " + result.error);
-
-      // Remove temporary event on failure
-      this.setState((prevState) => ({
-        events: prevState.events.filter((e) => e.id !== tempEvent.id),
-        allCalendarEvents: {
-          ...prevState.allCalendarEvents,
-          [targetCalendarUrl]:
-            prevState.allCalendarEvents[targetCalendarUrl]?.filter(
-              (e) => e.id !== tempEvent.id
-            ) || [],
-        },
-      }));
-    }
+    return this._syncChange(
+      calendarUrl,
+      (list) => [...list, tempEvent],
+      async () => {
+        const result = await ipcRenderer.invoke("create-event", {
+          serverUrl: this.state.serverUrl,
+          username: this.state.username,
+          password: this.state.password,
+          calendarUrl,
+          eventData: payload,
+        });
+        // Link the placeholder to the created resource (the reload then replaces
+        // it with the server's copy), or drop it if creation failed
+        this._updateCalendarEvents(calendarUrl, (list) =>
+          result.success
+            ? list.map((ev) => (ev.id === tempId ? { ...ev, url: result.eventUrl } : ev))
+            : list.filter((ev) => ev.id !== tempId)
+        );
+        return result;
+      },
+      "Failed to create event"
+    );
   };
-  // Shows context menu on event click; Alt+Click = quick delete shortcut
+
+  // Called by EventModal when creating
+  handleCreateEvent = (eventData) => {
+    this.setState({ showEventModal: false, isEditMode: false, editingEvent: null });
+    this._createEvent(eventData);
+  };
+
+  // ── Changing and deleting events ──────────────────────────────────────
+
+  /**
+   * _updateEvent — Saves changes to an event.
+   * For a recurring event, `scope` decides whether only this occurrence
+   * ("occurrence") or the whole series ("series") changes.
+   */
+  _updateEvent = (event, changes, scope = "occurrence") => {
+    if (!event.url) {
+      this._notify("This event is still being saved. Try again in a moment.");
+      return Promise.resolve({ success: false });
+    }
+    const isSeries = event.recurring && scope === "series";
+    const applyOptimistic = (list) =>
+      list.map((ev) => {
+        if (isSeries) {
+          // Text changes apply to every occurrence; new times come from the reload
+          if (ev.url !== event.url) return ev;
+          return {
+            ...ev,
+            title: changes.title !== undefined ? changes.title : ev.title,
+            description: changes.description !== undefined ? changes.description : ev.description,
+            location: changes.location !== undefined ? changes.location : ev.location,
+          };
+        }
+        if (ev.id !== event.id) return ev;
+        return {
+          ...ev,
+          ...changes,
+          start: new Date(changes.start || ev.start),
+          end: new Date(changes.end || ev.end),
+        };
+      });
+
+    const eventData = { ...changes };
+    if (changes.start) eventData.start = new Date(changes.start).toISOString();
+    if (changes.end) eventData.end = new Date(changes.end).toISOString();
+
+    return this._syncChange(
+      event.calendarUrl,
+      applyOptimistic,
+      () =>
+        ipcRenderer.invoke("update-event", {
+          username: this.state.username,
+          password: this.state.password,
+          calendarUrl: event.calendarUrl,
+          eventId: event.uid || event.id,
+          eventUrl: event.url,
+          recurrenceId: event.recurrenceId,
+          scope,
+          originalStart: new Date(event.start).toISOString(),
+          eventData,
+        }),
+      "Failed to save event"
+    );
+  };
+
+  /**
+   * handleEventDrop — Event dragged to a new time (single occurrence for
+   * recurring events). Dropping into the all-day row of the week/day view
+   * makes the event all-day; dropping an all-day event into the time grid
+   * gives it a one-hour slot.
+   */
+  handleEventDrop = ({ event, start, end, isAllDay }) => {
+    start = new Date(start);
+    end = new Date(end);
+    let allDay = !!event.allDay;
+    const inTimeGrid = this.state.currentView !== "month" && !isAllDay;
+
+    if (isAllDay && !allDay) {
+      allDay = true;
+      start = startOfDay(start);
+      end = addDays(start, 1);
+    } else if (inTimeGrid && allDay) {
+      allDay = false;
+      end = new Date(start.getTime() + 60 * 60000);
+    }
+
+    if (
+      new Date(event.start).getTime() === start.getTime() &&
+      new Date(event.end).getTime() === end.getTime() &&
+      !!event.allDay === allDay
+    ) {
+      return; // Dropped where it was
+    }
+    this._updateEvent(event, { start, end, allDay }, "occurrence");
+  };
+
+  // Handles event resize in week/day view
+  handleEventResize = ({ event, start, end }) => {
+    this._updateEvent(event, { start: new Date(start), end: new Date(end) }, "occurrence");
+  };
+
+  // Called by EventModal when saving an existing event
+  handleUpdateEvent = (eventData) => {
+    const { editingEvent } = this.state;
+    if (!editingEvent) return;
+    this.setState({ showEventModal: false, isEditMode: false, editingEvent: null });
+    this._updateEvent(
+      editingEvent,
+      {
+        title: eventData.title,
+        start: eventData.start,
+        end: eventData.end,
+        allDay: !!eventData.allDay,
+        description: eventData.description || "",
+        location: eventData.location || "",
+      },
+      eventData.scope || "occurrence"
+    );
+  };
+
+  /**
+   * handleDeleteEvent — Deletes an event. For a recurring event, `scope`
+   * "occurrence" removes just this occurrence; "series" removes all of them.
+   */
+  handleDeleteEvent = (event, scope = "series") => {
+    if (!event.url) {
+      this._notify("This event is still being saved. Try again in a moment.");
+      return;
+    }
+    const occurrenceOnly = event.recurring && scope === "occurrence";
+    this.setState({ showEventModal: false, isEditMode: false, editingEvent: null });
+    this._syncChange(
+      event.calendarUrl,
+      (list) =>
+        list.filter((ev) => (occurrenceOnly ? ev.id !== event.id : ev.url !== event.url)),
+      () =>
+        ipcRenderer.invoke("delete-event", {
+          serverUrl: this.state.serverUrl,
+          username: this.state.username,
+          password: this.state.password,
+          calendarUrl: event.calendarUrl,
+          eventId: event.uid || event.id,
+          eventUrl: event.url,
+          recurrenceId: occurrenceOnly ? event.recurrenceId : undefined,
+        }),
+      "Failed to delete event"
+    );
+  };
+
+  // Shows the event popover on click; Alt+Click = quick delete shortcut
   handleContextMenu = (event, jsEvent) => {
-    // Alt + Click = Quick delete
-    if (jsEvent.altKey) {
+    if (jsEvent && jsEvent.altKey) {
       jsEvent.preventDefault();
-      if (confirm(`Delete "${event.title}"?`)) {
-        this.handleDeleteEvent(event);
+      const what = event.recurring
+        ? `this occurrence of "${event.title}"`
+        : `"${event.title}"`;
+      if (confirm(`Delete ${what}?`)) {
+        this.handleDeleteEvent(event, "occurrence");
       }
       return;
     }
 
-    // Regular right-click = Context menu
-    jsEvent.preventDefault();
+    if (jsEvent) jsEvent.preventDefault();
+    // Anchor the popover beside the clicked event so it doesn't cover it
+    // (a popover under the cursor would swallow the second click of a double-click)
+    const target = jsEvent && jsEvent.target;
+    const eventEl =
+      target && target.closest ? target.closest(".rbc-event, .rbc-agenda-event-cell") : null;
+    const rect = eventEl ? eventEl.getBoundingClientRect() : null;
     this.setState({
       contextMenu: {
         visible: true,
-        x: jsEvent.clientX,
-        y: jsEvent.clientY,
+        x: jsEvent ? jsEvent.clientX : window.innerWidth / 2,
+        y: jsEvent ? jsEvent.clientY : window.innerHeight / 2,
+        anchor: rect
+          ? { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom }
+          : null,
         event: event,
       },
     });
   };
-  // Handles drag-and-drop event rescheduling (optimistic update + server sync)
-  handleEventDrop = async ({ event, start, end }) => {
-    // Update the event in state immediately for smooth UX (optimistic update)
-    const updatedEvents = this.state.events.map((ev) =>
-      ev.id === event.id ? { ...ev, start: new Date(start), end: new Date(end) } : ev
-    );
-    this.setState({ events: updatedEvents });
-
-    const calendarUrl = event.calendarUrl || this.state.calendarUrl;
-
-    try {
-      const result = await ipcRenderer.invoke("update-event", {
-        username: this.state.username,
-        password: this.state.password,
-        calendarUrl: calendarUrl,
-        eventId: event.id,
-        eventData: {
-          start: new Date(start).toISOString(),
-          end: new Date(end).toISOString(),
-        },
-      });
-
-      if (!result.success) {
-        // Revert optimistic update on failure
-        this.fetchAllCalendarEvents();
-      }
-    } catch (error) {
-      console.error("Error moving event:", error);
-      this.fetchAllCalendarEvents();
-    }
-  };
-  // Handles event resize in week/day view (optimistic update + server sync)
-  handleEventResize = async ({ event, start, end }) => {
-    // Update the event in state immediately for smooth UX (optimistic update)
-    const updatedEvents = this.state.events.map((ev) =>
-      ev.id === event.id ? { ...ev, start: new Date(start), end: new Date(end) } : ev
-    );
-    this.setState({ events: updatedEvents });
-
-    const calendarUrl = event.calendarUrl || this.state.calendarUrl;
-
-    try {
-      const result = await ipcRenderer.invoke("update-event", {
-        username: this.state.username,
-        password: this.state.password,
-        calendarUrl: calendarUrl,
-        eventId: event.id,
-        eventData: {
-          start: new Date(start).toISOString(),
-          end: new Date(end).toISOString(),
-        },
-      });
-
-      if (!result.success) {
-        this.fetchAllCalendarEvents();
-      }
-    } catch (error) {
-      console.error("Error resizing event:", error);
-      this.fetchAllCalendarEvents();
-    }
-  };
 
   handleCloseContextMenu = () => {
+    if (!this.state.contextMenu.visible) return;
     this.setState({
       contextMenu: {
         visible: false,
@@ -818,6 +1018,7 @@ class KalendarApp extends Component {
 
   // Opens the event modal in edit mode, pre-filling fields from the existing event
   handleEditEvent = (event) => {
+    if (event.isPreview) return;
     this.setState({
       isEditMode: true,
       editingEvent: event,
@@ -825,189 +1026,68 @@ class KalendarApp extends Component {
         title: event.title,
         start: event.start,
         end: event.end,
+        allDay: !!event.allDay,
         description: event.description || "",
         location: event.location || "",
+        calendarUrl: event.calendarUrl,
       },
       showEventModal: true,
+      contextMenu: { visible: false, x: 0, y: 0, event: null },
     });
   };
-  /**
-   * handleUpdateEvent — Saves changes to an existing event.
-   * Applies optimistic update to UI, then syncs to server.
-   * Reverts to server state on failure.
-   */
-  handleUpdateEvent = async (eventData) => {
-    // eventData comes directly from EventModal's local state
-    const { editingEvent } = this.state;
-    if (!editingEvent) return;
 
-    const calendarUrl = editingEvent.calendarUrl || this.state.calendarUrl;
+  // ── Calendars ─────────────────────────────────────────────────────────
 
-    // Optimistic update — apply changes to UI immediately
-    const updatedStart = new Date(eventData.start);
-    const updatedEnd = new Date(eventData.end);
-    this.setState((prevState) => ({
-      events: prevState.events.map((ev) =>
-        ev.id === editingEvent.id
-          ? {
-              ...ev,
-              title: eventData.title,
-              start: updatedStart,
-              end: updatedEnd,
-              description: eventData.description,
-              location: eventData.location,
-            }
-          : ev
-      ),
-      showEventModal: false,
-      isEditMode: false,
-      editingEvent: null,
-    }));
-
-    try {
-      const result = await ipcRenderer.invoke("update-event", {
-        username: this.state.username,
-        password: this.state.password,
-        calendarUrl: calendarUrl,
-        eventId: editingEvent.id,
-        eventData: {
-          title: eventData.title,
-          start: updatedStart.toISOString(),
-          end: updatedEnd.toISOString(),
-          description: eventData.description || "",
-          location: eventData.location || "",
-        },
-      });
-
-      if (!result.success) {
-        alert("Failed to update event: " + result.error);
-        this.fetchAllCalendarEvents();
-      }
-    } catch (error) {
-      console.error("Error updating event:", error);
-      alert("Error updating event: " + error.message);
-      this.fetchAllCalendarEvents();
-    }
-  };
-  // Deletes an event — removes from UI immediately, then deletes on server
-  handleDeleteEvent = async (event) => {
-    // Optimistic update - remove from UI immediately
-    const eventCalendarUrl = event.calendarUrl || this.state.calendarUrl;
-
-    this.setState((prevState) => {
-      const newEvents = prevState.events.filter((e) => e.id !== event.id);
-      const newAllCalendarEvents = { ...prevState.allCalendarEvents };
-      if (newAllCalendarEvents[eventCalendarUrl]) {
-        newAllCalendarEvents[eventCalendarUrl] = newAllCalendarEvents[
-          eventCalendarUrl
-        ].filter((e) => e.id !== event.id);
-      }
-
-      return {
-        events: newEvents,
-        allCalendarEvents: newAllCalendarEvents,
-      };
-    });
-
-    // Then delete from server
-    const result = await ipcRenderer.invoke("delete-event", {
+  /** Reloads the calendar list from the server (after creating/deleting one). */
+  refreshCalendarList = async () => {
+    const result = await ipcRenderer.invoke("connect-caldav", {
       serverUrl: this.state.serverUrl,
       username: this.state.username,
       password: this.state.password,
-      calendarUrl: eventCalendarUrl, // Use the event's calendar, not the primary one
-      eventId: event.id,
     });
-
-    if (!result.success) {
-      alert("Failed to delete event: " + result.error);
-      // Revert optimistic update on failure
-      this.fetchAllCalendarEvents();
-    }
+    if (!result.success) return null;
+    this.setState((prevState) => ({
+      calendars: result.calendars,
+      homeUrl: result.homeUrl || prevState.homeUrl,
+      selectedCalendarIds: prevState.selectedCalendarIds.filter((url) =>
+        result.calendars.some((cal) => cal.url === url)
+      ),
+    }));
+    return result.calendars;
   };
 
-  handleAddCalendar = () => {
-    this.setState({ showCreateCalendarModal: true });
-  };
   /**
-   * handleCreateCalendar — Creates a new calendar on the Nextcloud server.
-   * Adds an optimistic placeholder immediately, then issues MKCALENDAR on server.
-   * On success: reconnects to fetch the real calendar object from the server.
-   * On failure: removes the placeholder and alerts the user.
+   * handleCreateCalendar — Creates a new calendar on the server (MKCALENDAR),
+   * then reloads the calendar list and shows the new calendar.
    */
   handleCreateCalendar = async (calendarName, calendarColor) => {
-    // Optimistic update - add calendar to UI immediately
-    const tempCalendar = {
-      url: `${this.state.serverUrl}/calendars/${
-        this.state.username
-      }/${calendarName.toLowerCase().replace(/\s+/g, "-")}/`,
-      displayName: calendarName,
-      name: calendarName.toLowerCase().replace(/\s+/g, "-"),
-      components: ["VEVENT"],
-      color: calendarColor,
-      _isOptimistic: true, // Flag to track temporary calendar
-    };
+    this.setState({ showCreateCalendarModal: false });
 
-    // Add to calendars list immediately
-    this.setState((prevState) => ({
-      calendars: [...prevState.calendars, tempCalendar],
-      selectedCalendarIds: [...prevState.selectedCalendarIds, tempCalendar.url],
-      allCalendarEvents: {
-        ...prevState.allCalendarEvents,
-        [tempCalendar.url]: [],
-      },
-      showCreateCalendarModal: false,
-    }));
-
-    // Now actually create on server in background
     const result = await ipcRenderer.invoke("create-calendar", {
       serverUrl: this.state.serverUrl,
       username: this.state.username,
       password: this.state.password,
       calendarName: calendarName,
       calendarColor: calendarColor,
+      homeUrl: this.state.homeUrl,
     });
 
-    if (result.success) {
-      // Replace optimistic calendar with real one from server
-      setTimeout(async () => {
-        const reconnectResult = await ipcRenderer.invoke("connect-caldav", {
-          serverUrl: this.state.serverUrl,
-          username: this.state.username,
-          password: this.state.password,
-        });
-
-        if (reconnectResult.success) {
-          // Find the real calendar that was just created
-          const realCalendar = reconnectResult.calendars.find(
-            (cal) => cal.displayName === calendarName
-          );
-
-          if (realCalendar) {
-            this.setState((prevState) => ({
-              calendars: prevState.calendars.map((cal) =>
-                cal._isOptimistic && cal.displayName === calendarName
-                  ? realCalendar
-                  : cal
-              ),
-            }));
-          }
-        }
-      }, 500);
-    } else {
-      console.error("❌ Calendar creation failed:", result.error);
-
-      // Remove optimistic calendar on failure
-      this.setState((prevState) => ({
-        calendars: prevState.calendars.filter(
-          (cal) => !(cal._isOptimistic && cal.displayName === calendarName)
-        ),
-        selectedCalendarIds: prevState.selectedCalendarIds.filter(
-          (url) => url !== tempCalendar.url
-        ),
-      }));
-
-      alert("Failed to create calendar: " + result.error);
+    if (!result.success) {
+      console.error("Calendar creation failed:", result.error);
+      this._notify("Failed to create calendar: " + result.error, "error");
+      return;
     }
+
+    const calendars = await this.refreshCalendarList();
+    const created =
+      calendars && calendars.find((cal) => cal.url === result.calendarUrl);
+    if (created) {
+      this.setState((prevState) => ({
+        selectedCalendarIds: [...prevState.selectedCalendarIds, created.url],
+        allCalendarEvents: { ...prevState.allCalendarEvents, [created.url]: [] },
+      }));
+    }
+    this._notify(`Calendar "${calendarName}" created`);
   };
 
   handleCalendarSettings = (calendar) => {
@@ -1035,15 +1115,15 @@ class KalendarApp extends Component {
     });
 
     if (!result.success) {
-      alert("Failed to update calendar color: " + result.error);
+      this._notify("Failed to update calendar color: " + result.error, "error");
       // Revert on failure by re-fetching calendars
-      this.fetchAllCalendarEvents();
+      this.refreshCalendarList();
     }
   };
 
   handleUpdateCalendarName = async (calendarUrl, newName) => {
     if (!newName || !newName.trim()) {
-      alert("Calendar name cannot be empty");
+      this._notify("Calendar name cannot be empty", "error");
       return;
     }
 
@@ -1064,25 +1144,21 @@ class KalendarApp extends Component {
     });
 
     if (!result.success) {
-      alert("Failed to update calendar name: " + result.error);
+      this._notify("Failed to update calendar name: " + result.error, "error");
       // Revert on failure
-      this.fetchAllCalendarEvents();
+      this.refreshCalendarList();
     }
   };
 
   /**
    * handleDeleteCalendar — Deletes a calendar from both the UI and the Nextcloud server.
-   * 
+   *
    * Workflow:
-   *   1. Find the calendar name from state
-   *   2. Optimistically remove from state immediately (better UX)
-   *   3. Send IPC request to main process → caldavService.deleteCalendar()
-   *   4. On success: show confirmation alert, refresh calendars from server
-   *   5. On failure: show error alert, refresh to revert UI changes
-   * 
-   * Uses optimistic updates for immediate feedback, then reconciles with server.
-   * If deletion fails, the calendar list is refreshed from the server.
-   * 
+   *   1. Optimistically remove the calendar and its events from state
+   *   2. Send IPC request to main process → caldavService.deleteCalendar()
+   *   3. On success: confirm with a notice and refresh the calendar list
+   *   4. On failure: show the error and restore the list from the server
+   *
    * @param {string} calendarUrl - The full URL of the calendar to delete
    */
   handleDeleteCalendar = async (calendarUrl) => {
@@ -1091,19 +1167,19 @@ class KalendarApp extends Component {
         ?.displayName || "Calendar";
 
     // Optimistic update - remove from state immediately
-    this.setState((prevState) => ({
-      calendars: prevState.calendars.filter((cal) => cal.url !== calendarUrl),
-      selectedCalendarIds: prevState.selectedCalendarIds.filter(
-        (id) => id !== calendarUrl
-      ),
-      showCalendarSettingsModal: false,
-      selectedCalendarForSettings: null,
-      // Remove events from deleted calendar
-      allCalendarEvents: {
-        ...prevState.allCalendarEvents,
-        [calendarUrl]: undefined,
-      },
-    }));
+    this.setState((prevState) => {
+      const allCalendarEvents = { ...prevState.allCalendarEvents };
+      delete allCalendarEvents[calendarUrl];
+      return {
+        calendars: prevState.calendars.filter((cal) => cal.url !== calendarUrl),
+        selectedCalendarIds: prevState.selectedCalendarIds.filter(
+          (id) => id !== calendarUrl
+        ),
+        showCalendarSettingsModal: false,
+        selectedCalendarForSettings: null,
+        allCalendarEvents,
+      };
+    });
 
     // Delete on server
     const result = await ipcRenderer.invoke("delete-calendar", {
@@ -1113,16 +1189,19 @@ class KalendarApp extends Component {
     });
 
     if (result.success) {
-      alert(`"${calendarName}" has been deleted.`);
-      // Refresh to confirm deletion
-      this.fetchAllCalendars();
+      this._notify(`"${calendarName}" has been deleted.`);
+      this.refreshCalendarList();
     } else {
-      console.error("❌ Calendar deletion failed:", result.error);
-      alert("Failed to delete calendar: " + result.error);
-      // Revert on failure
-      setTimeout(() => {
-        this.fetchAllCalendars();
-      }, 500);
+      console.error("Calendar deletion failed:", result.error);
+      this._notify("Failed to delete calendar: " + result.error, "error");
+      // Revert on failure: restore the list, re-show the calendar and its events
+      const calendars = await this.refreshCalendarList();
+      if (calendars && calendars.some((cal) => cal.url === calendarUrl)) {
+        this.setState((prevState) => ({
+          selectedCalendarIds: [...prevState.selectedCalendarIds, calendarUrl],
+        }));
+        this.loadCalendarEvents(calendarUrl);
+      }
     }
   };
 
@@ -1136,7 +1215,7 @@ class KalendarApp extends Component {
     });
 
     if (result.success) {
-      alert(`Calendar shared with ${shareEmail}!`);
+      this._notify(`Calendar shared with ${shareEmail}!`);
 
       // Update calendar shares in state
       if (result.share) {
@@ -1156,8 +1235,8 @@ class KalendarApp extends Component {
         }));
       }
     } else {
-      console.error("❌ Calendar share failed:", result.error);
-      alert("Failed to share calendar: " + result.error);
+      console.error("Calendar share failed:", result.error);
+      this._notify("Failed to share calendar: " + result.error, "error");
     }
   };
 
@@ -1190,34 +1269,29 @@ class KalendarApp extends Component {
         },
       }));
     } else {
-      console.error("❌ Calendar share removal failed:", result.error);
-      alert("Failed to remove calendar share: " + result.error);
+      console.error("Calendar share removal failed:", result.error);
+      this._notify("Failed to remove calendar share: " + result.error, "error");
     }
   };
 
   handleLogout = () => {
-    // Clear credentials from settings
-    const { settings } = this.state;
-    const newSettings = {
-      ...settings,
-      serverUrl: "",
+    // Clear saved credentials (preferences stay)
+    ipcRenderer.invoke("save-settings", {
+      serverUrl: this.state.serverUrl, // Keep serverUrl pre-filled for convenience
       username: "",
       password: "",
-    };
+    });
 
-    // Save cleared settings
-    ipcRenderer.invoke("save-settings", newSettings);
-
-    // Also clear from state
     this.setState({
       isConnected: false,
       calendars: [],
-      calendarUrl: "",
-      events: [],
+      selectedCalendarIds: [],
+      allCalendarEvents: {},
+      homeUrl: null,
       showLoginForm: true,
       username: "",
       password: "",
-      // Keep serverUrl pre-filled for convenience
+      contextMenu: { visible: false, x: 0, y: 0, event: null },
     });
   };
 
@@ -1225,323 +1299,142 @@ class KalendarApp extends Component {
   // Task Management Handlers
   // ============================================
 
-  // Creates a new task list locally (TODO: sync via CalDAV VTODO)
+  // Creates a new task list (stored locally; TODO: sync via CalDAV VTODO)
   handleCreateList = (listName) => {
     const newList = {
-      id: Date.now().toString(),
+      id: newId(),
       name: listName,
       tasks: [],
       createdAt: new Date().toISOString(),
     };
 
-    // Optimistic update
     this.setState((prevState) => ({
       taskLists: [...prevState.taskLists, newList],
     }));
-
-    // TODO: Sync to CalDAV server using VTODO
   };
 
-  // Creates a new task within a list (TODO: sync via CalDAV VTODO)
+  // Creates a new task within a list (stored locally; TODO: sync via CalDAV VTODO)
   handleCreateTask = (listId, taskName) => {
     const newTask = {
-      id: Date.now().toString(),
+      id: newId(),
       name: taskName,
       completed: false,
       createdAt: new Date().toISOString(),
     };
 
-    // Optimistic update
     this.setState((prevState) => ({
       taskLists: prevState.taskLists.map((list) =>
         list.id === listId ? { ...list, tasks: [...list.tasks, newTask] } : list
       ),
     }));
-
-    // TODO: Sync to CalDAV server using VTODO
   };
-  // Toggles task completion — also updates any matching calendar events
+
+  // Toggles task completion (events scheduled from the task are struck through)
   handleToggleTask = (listId, taskId) => {
-    // Find the task to determine the new completed state
-    const list = this.state.taskLists.find((l) => l.id === listId);
-    const task = list?.tasks.find((t) => t.id === taskId);
-    if (!task) return;
-
-    const newCompleted = !task.completed;
-    const taskName = task.name;
-
-    // Single setState to update both taskLists and matching calendar events
-    // atomically, preventing intermediate re-renders that cause visual shifts
     this.setState((prevState) => ({
       taskLists: prevState.taskLists.map((l) =>
         l.id === listId
           ? {
               ...l,
               tasks: l.tasks.map((t) =>
-                t.id === taskId
-                  ? { ...t, completed: newCompleted }
-                  : t
+                t.id === taskId ? { ...t, completed: !t.completed } : t
               ),
             }
           : l
       ),
-      events: prevState.events.map((ev) => {
-        const isMatch =
-          ev.title === taskName &&
-          (ev.title === taskName ||
-            (ev.description && ev.description.includes("Task from list:")));
-        if (isMatch) {
-          return { ...ev, completed: newCompleted };
-        }
-        return ev;
-      }),
     }));
-
   };
 
+  /** Deletes the calendar events that were scheduled from the given tasks. */
+  _deleteTaskEvents(taskNames) {
+    if (taskNames.length === 0) return;
+    Object.values(this.state.allCalendarEvents).forEach((list) =>
+      list
+        .filter((ev) => taskNames.includes(ev.title) && isTaskEvent(ev) && ev.url)
+        .forEach((ev) => this.handleDeleteEvent(ev, "occurrence"))
+    );
+  }
+
   handleDeleteTask = (listId, taskId) => {
-    // Find the task name before deleting so we can also remove matching calendar events
     const list = this.state.taskLists.find((l) => l.id === listId);
     const task = list?.tasks.find((t) => t.id === taskId);
-    const taskName = task?.name;
 
-    // Atomically remove the task and any matching calendar events
     this.setState((prevState) => ({
       taskLists: prevState.taskLists.map((l) =>
         l.id === listId
           ? { ...l, tasks: l.tasks.filter((t) => t.id !== taskId) }
           : l
       ),
-      events: taskName
-        ? prevState.events.filter((ev) => {
-            const isTaskEvent =
-              ev.title === taskName &&
-              ev.description &&
-              ev.description.includes("Task from list:");
-            return !isTaskEvent;
-          })
-        : prevState.events,
     }));
-
+    if (task) this._deleteTaskEvents([task.name]);
   };
 
   handleDeleteList = (listId) => {
-    // Collect all task names in this list so we can remove their calendar events
     const list = this.state.taskLists.find((l) => l.id === listId);
     const taskNames = list?.tasks ? list.tasks.map((t) => t.name) : [];
 
-    // Atomically remove the list and all matching calendar events
     this.setState((prevState) => ({
       taskLists: prevState.taskLists.filter((l) => l.id !== listId),
-      events:
-        taskNames.length > 0
-          ? prevState.events.filter((ev) => {
-              const isTaskEvent =
-                taskNames.includes(ev.title) &&
-                ev.description &&
-                ev.description.includes("Task from list:");
-              return !isTaskEvent;
-            })
-          : prevState.events,
     }));
-
+    this._deleteTaskEvents(taskNames);
   };
+
   handleToggleTaskManager = () => {
     this.setState((prevState) => ({
       showTaskManager: !prevState.showTaskManager,
     }));
   };
-  // Opens the event modal pre-filled with task data, allowing the user to schedule it
-  handleTaskToCalendar = (task, listName) => {
-    // Open event modal with task details pre-filled
-    const now = new Date();
-    const startTime = new Date(now);
-    startTime.setHours(9, 0, 0, 0); // Default to 9 AM
-    const endTime = new Date(startTime);
-    endTime.setHours(10, 0, 0, 0); // Default to 1 hour duration
 
-    const targetCalUrl =
-          this.state.selectedCalendarIds[0] || this.state.calendarUrl;
-    const targetCal = this.state.calendars.find(
-      (cal) => cal.url === targetCalUrl
-    );
+  // Calendar button on a task: opens the event modal pre-filled with the task
+  handleTaskToCalendar = (listId, taskId) => {
+    const list = this.state.taskLists.find((l) => l.id === listId);
+    const task = list?.tasks.find((t) => t.id === taskId);
+    if (!task) return;
 
-    this.setState({
-      showEventModal: true,
-      isEditMode: false,
-      newEvent: {
-        title: task.name,
-        start: startTime,
-        end: endTime,
-        description: `Task from list: ${listName}`,
-        location: "",
-        calendarUrl: targetCalUrl,
-        calendarName: targetCal?.displayName || "",
-      },
+    const duration = this.state.settings?.defaultTaskDuration || 15;
+    const start = new Date(this.state.currentDate || new Date());
+    if (startOfDay(start).getTime() === startOfDay(new Date()).getTime()) {
+      start.setHours(new Date().getHours() + 1, 0, 0, 0);
+    } else {
+      start.setHours(9, 0, 0, 0);
+    }
+
+    this._openNewEventModal({
+      title: task.name,
+      start,
+      end: new Date(start.getTime() + duration * 60000),
+      description: `Task from list: ${list.name}`,
     });
   };
+
   /**
-   * handleTaskDroppedOnCalendar — Handles native drag-drop of a task onto the calendar.
-   * Creates an event at the drop time with the task's name and configured duration.
-   * Uses optimistic UI + background server sync via createEventFromTask().
+   * handleTaskDroppedOnCalendar — A task was dragged from the sidebar onto
+   * the calendar: creates an event at the drop time with the task's name and
+   * the configured default task duration.
    */
   handleTaskDroppedOnCalendar = (dragData, slotInfo) => {
-    // Validate dragData
     if (!dragData || !dragData.task || !dragData.task.name) {
       console.error("Invalid drag data:", dragData);
-      alert("Error: Invalid task data");
       return;
     }
 
-    // Get the default task duration from settings (default 15 minutes)
+    const calendarUrl = this._getDefaultCalendarUrl();
+    if (!calendarUrl) {
+      this._notify("No calendar available. Please create a calendar first.", "error");
+      return;
+    }
+
     const taskDuration = this.state.settings?.defaultTaskDuration || 15;
-
-    // Use the slot time if available, otherwise use current time
-    const startTime = slotInfo?.start || new Date();
-    const endTime = new Date(startTime);
-    endTime.setMinutes(endTime.getMinutes() + taskDuration);
-
-    // Get the calendar to add to
-    const targetCalendarUrl =
-      this.state.selectedCalendarIds[0] || this.state.calendarUrl;
-
-    if (!targetCalendarUrl) {
-      console.error("No calendar URL available");
-      alert("Error: No calendar selected. Please select a calendar first.");
-      return;
-    }
-
-    // Find the calendar name for the target
-    const targetCalendar = this.state.calendars.find(
-      (cal) => cal.url === targetCalendarUrl
-    );
-
-    // Create new event object
-    const newEvent = {
+    const start = new Date(slotInfo?.start || new Date());
+    this._createEvent({
       title: dragData.task.name,
-      start: startTime,
-      end: endTime,
+      start,
+      end: new Date(start.getTime() + taskDuration * 60000),
       description: `Task from list: ${dragData.listName || "Unknown"}`,
       location: "",
-      calendarUrl: targetCalendarUrl,
-      calendarName: targetCalendar?.displayName || "",
-    };
-
-    // Add the event immediately to the calendar (optimistic update)
-    const tempId = `temp-${Date.now()}`;
-    const displayEvent = {
-      ...newEvent,
-      id: tempId,
-      tempId: tempId,
-    };
-
-    // Optimistically add to state
-    this.setState((prevState) => ({
-      events: [...prevState.events, displayEvent],
-    }));
-
-    // Create on server
-    this.createEventFromTask(newEvent, tempId);
+      calendarUrl,
+    });
   };
-  // Server-side creation of an event from a dropped task (with retry/preserve on failure)
-  createEventFromTask = async (eventData, tempId) => {
-    try {
-      // Validate eventData
-      if (!eventData || !eventData.title) {
-        throw new Error("Invalid event data: missing title");
-      }
-
-      const result = await ipcRenderer.invoke("create-event", {
-        username: this.state.username,
-        password: this.state.password,
-        calendarUrl: eventData.calendarUrl,
-        eventData: {
-          title: eventData.title,
-          description: eventData.description || "",
-          location: eventData.location || "",
-          start: eventData.start.toISOString(),
-          end: eventData.end.toISOString(),
-        },
-      });
-      if (result.success) {
-        const eventId = result.eventId || tempId;
-
-        // Replace the temp event with a permanent one immediately
-        this.setState((prevState) => ({
-          events: prevState.events.map((evt) =>
-            evt.tempId === tempId
-              ? {
-                  ...evt,
-                  id: eventId,
-                  tempId: undefined,
-                  pendingSync: true,
-                }
-              : evt
-          ),
-        }));
-
-        // Refresh only the affected calendar after a short delay
-        await new Promise((resolve) => setTimeout(resolve, 500));
-
-        try {
-          await this.fetchSingleCalendarEvents(eventData.calendarUrl);
-          this.setState((prevState) => {
-            const serverHasEvent = prevState.events.some(
-              (evt) => !evt.pendingSync && evt.id === eventId
-            );
-            if (serverHasEvent) {
-              return {
-                events: prevState.events.filter(
-                  (evt) => !(evt.pendingSync && evt.id === eventId)
-                ),
-              };
-            }
-            return {};
-          });
-        } catch (fetchErr) {
-          // Local event preserved on fetch failure
-        }
-      } else {
-        console.error("❌ Failed to create event from task:", result.error);
-
-        // Keep the event visible even if server sync fails
-        // Just remove the tempId so it becomes a "real" event
-        this.setState((prevState) => ({
-          events: prevState.events.map((evt) =>
-            evt.tempId === tempId
-              ? {
-                  ...evt,
-                  id: tempId, // Use tempId as permanent ID
-                  tempId: undefined,
-                }
-              : evt
-          ),
-        }));
-
-      }
-    } catch (error) {
-      console.error("Error creating event from task:", error);
-
-      // Keep the event visible even on error
-      // Just mark it as local-only
-      this.setState((prevState) => ({
-        events: prevState.events.map((evt) =>
-          evt.tempId === tempId
-            ? {
-                ...evt,
-                id: tempId, // Use tempId as permanent ID
-                tempId: undefined,
-                localOnly: true, // Mark as not synced
-              }
-            : evt
-        ),
-      }));
-
-    }
-  };
-
-  // handleAddTaskList is no longer needed — TaskManager uses inline forms
-  // and calls onCreateList / onCreateTask directly.
 
   handleTaskClick = (listId, taskId) => {
     // Open task modal for editing
@@ -1557,47 +1450,37 @@ class KalendarApp extends Component {
     }
   };
 
-  handleTaskModalSubmit = (taskData) => {
+  /** Saves edits made in the task modal. */
+  _saveTaskEdits(taskData) {
     const { editingTaskListId, editingTask } = this.state;
+    if (!editingTask) return;
+    this.setState((prevState) => ({
+      taskLists: prevState.taskLists.map((list) =>
+        list.id === editingTaskListId
+          ? {
+              ...list,
+              tasks: list.tasks.map((task) =>
+                task.id === editingTask.id ? { ...task, ...taskData } : task
+              ),
+            }
+          : list
+      ),
+    }));
+  }
 
-    if (editingTask) {
-      // Update existing task
-      this.setState((prevState) => ({
-        taskLists: prevState.taskLists.map((list) =>
-          list.id === editingTaskListId
-            ? {
-                ...list,
-                tasks: list.tasks.map((task) =>
-                  task.id === editingTask.id ? { ...task, ...taskData } : task
-                ),
-              }
-            : list
-        ),
-        showTaskModal: false,
-        editingTaskListId: null,
-        editingTask: null,
-      }));
-    }
+  handleTaskModalSubmit = (taskData) => {
+    this._saveTaskEdits(taskData);
+    this._closeTaskModal();
   };
 
-  handleTaskModalAddToCalendar = (eventData) => {
-    // Add task as calendar event
-    this.setState({
-      showTaskModal: false,
-      showEventModal: true,
-      isEditMode: false,
-      newEvent: {
-        ...eventData,
-        calendarUrl:
-          this.state.selectedCalendarIds[0] || this.state.calendarUrl,
-      },
-    });
+  handleTaskModalAddToCalendar = (eventData, taskData) => {
+    if (taskData) this._saveTaskEdits(taskData);
+    this.setState({ showTaskModal: false, editingTaskListId: null, editingTask: null });
+    this._openNewEventModal(eventData);
   };
+
   // ============================================
   // End Task Management Handlers
-  // ============================================
-  // ============================================
-  // Creative Feature Handlers
   // ============================================
 
   handleChangeView = (view) => {
@@ -1610,54 +1493,29 @@ class KalendarApp extends Component {
 
   // Updates a single setting, applies it to the DOM, and persists (debounced)
   handleSettingChange = (key, value) => {
-    const newSettings = { ...this.state.settings, [key]: value };
-    this.setState({ settings: newSettings }, () => {
-      this.applySettings();
-      // Debounce saving to avoid frequent synchronous work in main process
-      this._debouncedSaveSettings(newSettings);
-    });
+    this.setState(
+      (prevState) => ({
+        settings: { ...prevState.settings, [key]: value },
+        // Show the new default view right away
+        currentView: key === "defaultView" ? value : prevState.currentView,
+      }),
+      () => {
+        this.applySettings();
+        // Debounce saving to avoid frequent synchronous work in main process
+        this._debouncedSaveSettings(this.state.settings);
+      }
+    );
   };
 
   // Resets all settings to factory defaults and persists immediately
   handleResetSettings = () => {
-    const defaults = {
-      theme: "light",
-      primaryColor: "#5e72e4",
-      accentColor: "#11cdef",
-      fontSize: "medium",
-      firstDayOfWeek: 0,
-      timeFormat: "12h",
-      defaultView: "month",
-      showWeekNumbers: false,
-      compactMode: false,
-      animations: true,
-      defaultTaskDuration: 15,
-    };
+    const defaults = { ...DEFAULT_SETTINGS };
     this.setState({ settings: defaults }, () => {
       this.applySettings();
       ipcRenderer.invoke("save-settings", defaults);
     });
   };
 
-  // ============================================
-  // End Creative Feature Handlers
-  // ============================================
-
-  /**
-   * formatDateTimeLocal — Converts a Date object to "YYYY-MM-DDTHH:MM" string
-   * for use as the value of <input type="datetime-local">.
-   * Returns empty string for invalid dates to prevent NaN in inputs.
-   */
-  formatDateTimeLocal = (date) => {
-    const d = new Date(date);
-    if (isNaN(d.getTime())) return "";
-    const year = d.getFullYear();
-    const month = String(d.getMonth() + 1).padStart(2, "0");
-    const day = String(d.getDate()).padStart(2, "0");
-    const hours = String(d.getHours()).padStart(2, "0");
-    const minutes = String(d.getMinutes()).padStart(2, "0");
-    return `${year}-${month}-${day}T${hours}:${minutes}`;
-  };
   // ── Stable callback references for render (avoid inline arrows) ──
   _openCreateCalendarModal = () => this.setState({ showCreateCalendarModal: true });
   _openSettings = () => this.setState({ showSettings: true });
@@ -1667,16 +1525,16 @@ class KalendarApp extends Component {
   _closeCalendarSettingsModal = () => this.setState({ showCalendarSettingsModal: false, selectedCalendarForSettings: null });
   _closeTaskModal = () => this.setState({ showTaskModal: false, editingTaskListId: null, editingTask: null });
   _handleRefresh = () => this.fetchAllCalendarEvents();
-  _handleCalendarChange = (url) => { this.setState({ calendarUrl: url }); this.fetchEvents(url); };
 
   /**
    * render — Renders either the login form or the full app layout.
    * The app layout consists of:
    *   - CalendarView (sidebar + calendar grid)
-   *   - ContextMenu (right-click event actions)
+   *   - ContextMenu (event details + actions)
    *   - EventModal (create/edit events)
    *   - Settings, CreateCalendarModal, CalendarSettingsModal
    *   - TaskModal (edit task details)
+   *   - A transient notice for confirmations and errors
    */
   render() {
     if (this.state.showLoginForm) {
@@ -1689,15 +1547,18 @@ class KalendarApp extends Component {
         isLoading: this.state.isLoading,
         errorMessage: this.state.errorMessage,
       });
-    }    // The root div is now the CalendarView itself, no extra div needed
+    }
+
+    const events = this._getVisibleEvents();
+    const { notice } = this.state;
+
     return h(
       "div",
       { className: "kalendar-app-wrapper" },
       h(CalendarView, {
         localizer: localizer,
-        events: this.state.events,
+        events: events,
         calendars: this.state.calendars,
-        calendarUrl: this.state.calendarUrl,
         selectedCalendarIds: this.state.selectedCalendarIds,
         settings: this.state.settings,
         currentDate: this.state.currentDate,
@@ -1707,12 +1568,13 @@ class KalendarApp extends Component {
         currentView: this.state.currentView,
         onSelectSlot: this.handleSelectSlot,
         onSelectEvent: this.handleContextMenu,
+        onDoubleClickEvent: this.handleEditEvent,
+        onNewEvent: this.handleNewEvent,
         onEventDrop: this.handleEventDrop,
         onEventResize: this.handleEventResize,
         onCalendarToggle: this.handleCalendarToggle,
         onAddCalendar: this._openCreateCalendarModal,
         onCalendarSettings: this.handleCalendarSettings,
-        onCalendarChange: this._handleCalendarChange,
         onDateNavigate: this.handleDateNavigate,
         onRefresh: this._handleRefresh,
         onSettingsClick: this._openSettings,
@@ -1724,17 +1586,19 @@ class KalendarApp extends Component {
         onDeleteList: this.handleDeleteList,
         onToggleTask: this.handleToggleTask,
         onTaskToCalendar: this.handleTaskToCalendar,
-        onTaskClick: this.handleTaskClick,        onTaskDroppedOnCalendar: this.handleTaskDroppedOnCalendar,
+        onTaskClick: this.handleTaskClick,
+        onTaskDroppedOnCalendar: this.handleTaskDroppedOnCalendar,
         onViewChange: this.handleChangeView,
       }),
-
-      // Task Manager removed - now integrated in sidebar
 
       h(ContextMenu, {
         visible: this.state.contextMenu.visible,
         x: this.state.contextMenu.x,
         y: this.state.contextMenu.y,
+        anchor: this.state.contextMenu.anchor,
         event: this.state.contextMenu.event,
+        calendars: this.state.calendars,
+        timeFormat: this.state.settings.timeFormat,
         onEdit: this.handleEditEvent,
         onDelete: this.handleDeleteEvent,
         onClose: this.handleCloseContextMenu,
@@ -1743,12 +1607,15 @@ class KalendarApp extends Component {
         h(EventModal, {
           newEvent: this.state.newEvent,
           isEditMode: this.state.isEditMode,
-          calendars: this.state.calendars,
+          isRecurring: !!(this.state.isEditMode && this.state.editingEvent?.recurring),
+          calendars: this._getEventCalendars(),
           onSubmit: this.state.isEditMode
             ? this.handleUpdateEvent
             : this.handleCreateEvent,
+          onDelete: this.state.isEditMode
+            ? (scope) => this.handleDeleteEvent(this.state.editingEvent, scope)
+            : null,
           onClose: this._closeEventModal,
-          isLoading: this.state.isCreatingEvent,
         }),
       this.state.showSettings &&
         h(Settings, {
@@ -1784,7 +1651,28 @@ class KalendarApp extends Component {
           isEdit: !!this.state.editingTask,
           onSubmit: this.handleTaskModalSubmit,
           onAddToCalendar: this.handleTaskModalAddToCalendar,
-          onClose: this._closeTaskModal,        })
+          onClose: this._closeTaskModal,
+        }),
+
+      notice &&
+        h(
+          "div",
+          {
+            key: notice.id,
+            className: `kal-notice kal-notice--${notice.type}`,
+            role: notice.type === "error" ? "alert" : "status",
+          },
+          h("span", { className: "kal-notice-text" }, notice.text),
+          h(
+            "button",
+            {
+              className: "kal-notice-close",
+              onClick: this._dismissNotice,
+              "aria-label": "Dismiss",
+            },
+            "×"
+          )
+        )
     );
   }
 }
